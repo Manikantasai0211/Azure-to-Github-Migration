@@ -1,0 +1,214 @@
+name: IFT-DEPLOY-TO-QA
+
+on:
+  workflow_dispatch:
+    inputs:
+      src-branch-name:
+        description: 'Source branch to checkout in this repository'
+        required: true
+        default: 'testing-snyk'
+      manual_commit_id:
+        description: 'Manual commit ID for delta calculation'
+        required: false
+        default: 'default'
+      test_level:
+        description: 'Test level for deployment'
+        required: true
+        type: choice
+        options:
+          - NoTestRun
+          - RunSpecifiedTests
+          - RunLocalTests
+        default: NoTestRun
+      test_classes:
+        description: 'Test classes to run if RunSpecifiedTests is chosen'
+        required: false
+        default: ''
+      enable_azdo_release:
+        description: 'Trigger Azure DevOps release after publish?'
+        type: boolean
+        default: false
+        required: false
+      application_name:
+        description: 'Select the Application'
+        required: true
+        type: choice
+        options:
+          - irep
+          - usma
+          - AEBAT
+          - FMPT
+          - GenAIsys
+          - MAT
+          - OPENDOOR
+          - TAP
+          - Touchpoint
+        default: irep
+
+env:
+  QA_ORG_USER: ${{ vars.QA_USERNAME }}
+  QA_ORG_PASSWORD: ${{ secrets.QA_PASSWORD }}
+  QA_ORG_URL: ${{ vars.QA_URL }}
+  AZDO_RELEASE_DEFINITION_ID: AZDO-RELEASE-DEFINITION-ID
+  AZDO_RELEASE_ARTIFACT_ALIAS: abbvie-internal-golden-pipeline-sfdc-testing-main
+
+jobs:
+  set_app_id:
+    name: Set Application ID
+    runs-on: ubuntu-latest
+    outputs:
+      application_id: ${{ steps.set-id.outputs.application_id }}
+      jfrog_repo_path: ${{ steps.set-id.outputs.jfrog_repo_path }}
+    steps:
+      - name: Map application name to ID and jfrog path
+        id: set-id
+        run: |
+          app_name="${{ github.event.inputs.application_name }}"
+          case "$app_name" in
+            irep)
+              app_id="BA0009043"
+              jfrog_path="com-generic-local/IFT/irep"
+              ;;
+            usma)
+              app_id="BA0007551"
+              jfrog_path="com-generic-local/IFT/usma"
+              ;;
+            AEBAT)
+              app_id="BA0001571"
+              jfrog_path="com-generic-local/IFT/AEBAT"
+              ;;
+            FMPT)
+              app_id="BA0009661"
+              jfrog_path="com-generic-local/IFT/FMPT"
+              ;;
+            GenAIsys)
+              app_id="BA0013076"
+              jfrog_path="com-generic-local/IFT/GenAIsys"
+              ;;
+            MAT)
+              app_id="BA0009353"
+              jfrog_path="com-generic-local/IFT/MAT"
+              ;;    
+            OPENDOOR)
+              app_id="BA0010330"
+              jfrog_path="com-generic-local/IFT/OPENDOOR"
+              ;; 
+            TAP)
+              app_id="BA0008901"
+              jfrog_path="com-generic-local/IFT/TAP"
+              ;;
+            Touchpoint)
+              app_id="BA0010057"
+              jfrog_path="com-generic-local/IFT/Touchpoint"
+              ;;              
+            *)
+              echo "❌ Unknown application: $app_name"
+              exit 1
+              ;;
+          esac
+
+          echo "✅ Mapped $app_name to applicationId=$app_id and jfrog_repo_path=$jfrog_path"
+
+          echo "application_id=$app_id" >> $GITHUB_OUTPUT
+          echo "jfrog_repo_path=$jfrog_path" >> $GITHUB_OUTPUT
+
+  build_publish:
+    name: Build and Publish - Branch ${{ github.event.inputs.src-branch-name }}
+    needs: set_app_id
+    uses: abbvie-enterprise-p/ift/.github/workflows/sfdc-common-ci.yml@testing-snyk
+    with:
+      runs-on: ubuntu-latest
+      ref: ${{ github.event.inputs.src-branch-name }}
+      source-folder: force-app
+      additional-build-artifacts: '["manifest/package.xml"]'
+      jfrog-repo-path: ${{ needs.set_app_id.outputs.jfrog_repo_path }}
+      jfrog-user: svc-com@abbvie.com
+      jfrog-project-key: com
+      artifact-name: IFT-Build
+      applicationId: ${{ needs.set_app_id.outputs.application_id }}
+    secrets: inherit
+
+  deploy_to_qa:
+    name: Deploy to QA Org
+    needs: build_publish
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.src-branch-name }}
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16.x'
+
+      - name: Install SFDX CLI and plugins
+        run: |
+          npm install sfdx-cli --global
+          sfdx --version
+          echo 'y' | sfdx plugins:install sfpowerkit
+
+      - name: Determine commit IDs and generate delta
+        id: commit_delta
+        run: |
+          LATEST_COMMIT_ID=$(git log -n 1 origin/${{ github.event.inputs.src-branch-name }} --pretty=format:'%H')
+          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
+
+          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
+            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1)
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+          fi
+
+          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
+          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
+
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+
+          if [ ! -d "Delta_pkg" ]; then
+            echo "No diff found, exiting."
+            exit 1
+          fi
+
+      - name: Authenticate and deploy
+        run: |
+          TEST_LEVEL="${{ github.event.inputs.test_level }}"
+          TEST_CLASSES="${{ github.event.inputs.test_classes }}"
+
+          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
+            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+            if [[ -z "$TEST_CLASSES" ]]; then
+              echo "Please specify the Test Classes Names to run."
+              exit 1
+            else
+              TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
+            fi
+          fi
+
+          echo "Authenticating QA"
+          sfdx sfpowerkit:auth:login -u $QA_ORG_USER -p $QA_ORG_PASSWORD -r $QA_ORG_URL
+          echo "Validation"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $QA_ORG_USER -l "$TEST_LEVEL"
+
+          echo "🎉 Deployment completed successfully"
+
+  trigger_azdo_release:
+    if: ${{ github.event_name != 'pull_request' && github.event.inputs.enable_azdo_release == true }}
+    needs: deploy_to_qa
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check Azure CLI version
+        run: az --version
+
+      - name: Trigger Azure DevOps release
+        env:
+          AZURE_DEVOPS_EXT_PAT: ${{ secrets.AZURE_DEVOPS_RELEASE_TOKEN }}
+          AZDO_RELEASE_DEFINITION_ID: ${{ env.AZDO_RELEASE_DEFINITION_ID }}
+          AZDO_RELEASE_ARTIFACT_ALIAS: ${{ env.AZDO_RELEASE_ARTIFACT_ALIAS }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -e
+          az extension add --name azure-devops || echo "Azure DevOps extension already installed."
+          ARTIFACT_METADATA="${AZDO_RELEASE_ARTIFACT_ALIAS}=${GITHUB_RUN_NUMBER}"
+          az pipelines release create --artifact-metadata-list "$ARTIFACT_METADATA" --definition-id="$AZDO_RELEASE_DEFINITION_ID" --description 'Triggered from Github' --detect false --org https://dev.azure.com/abbvie-devops-lab/ --project 'Abbvie BTS'
