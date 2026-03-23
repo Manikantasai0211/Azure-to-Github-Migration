@@ -1,6 +1,12 @@
 name: Dev-Org
 
 on:
+  workflow_dispatch:
+    inputs:
+      src-branch-name:
+        description: 'Source branch to checkout in this repository'
+        required: true
+        default: 'testing-snyk'
       manual_commit_id:
         description: 'Manual commit ID'
         required: false
