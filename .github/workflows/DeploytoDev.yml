@@ -15,7 +15,8 @@ on:
           - NoTestRun
           - RunSpecifiedTests
           - RunLocalTests
-        default: NoTestRun
+          - RunAllTestsInOrg
+        default: RunSpecifiedTests
       test_classes:
         description: 'Test classes'
         required: false
@@ -81,15 +82,23 @@ jobs:
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
+          # Logic for handling test levels
           if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
             TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
             if [[ -z "$TEST_CLASSES" ]]; then
-              echo "Please specify the Test Classes Names to run."
+              echo "❌ Please specify the Test Classes Names to run."
               exit 1
             else
               TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
             fi
+          elif [[ "$TEST_LEVEL" == 'RunAllTestsInOrg' ]]; then
+            TEST_LEVEL="RunAllTestsInOrg"
+          elif [[ "$TEST_LEVEL" == 'RunLocalTests' ]]; then
+            TEST_LEVEL="RunLocalTests"
+          elif [[ "$TEST_LEVEL" == 'NoTestRun' ]]; then
+            TEST_LEVEL="NoTestRun"
           fi
+
 
           echo "Authenticating PROD"
           sfdx force:auth:jwt:grant --clientid $PROD_ORG_CLIENTID --jwtkeyfile ./server.key --username $PROD_ORG_USER --instanceurl $PROD_ORG_URL 
