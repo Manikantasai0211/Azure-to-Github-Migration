@@ -93,7 +93,7 @@ jobs:
 
 
           echo "Authenticating PROD"
-          sfdx force:auth:jwt:grant --clientid $PROD_ORG_CLIENTID --jwtkeyfile ./server.key --username $PROD_ORG_USER --instanceurl $PROD_ORG_URL 
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $PROD_ORG_USER --instanceurl $PROD_ORG_URL 
           echo "Validation"
           sfdx force:source:deploy -c -p Delta_pkg/force-app -u $PROD_ORG_USER -l "$TEST_LEVEL"  
           echo "🎉 Validation completed successfully"          
