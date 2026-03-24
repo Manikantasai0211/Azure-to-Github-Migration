@@ -6,7 +6,7 @@ on:
       src-branch-name:
         description: 'Source branch to checkout in this repository'
         required: true
-        default: 'testing-snyk'
+        default: 'DevOrg'
       manual_commit_id:
         description: 'Manual commit ID for delta calculation'
         required: false
@@ -24,93 +24,18 @@ on:
         description: 'Test classes to run if RunSpecifiedTests is chosen'
         required: false
         default: ''
-      enable_azdo_release:
-        description: 'Trigger Azure DevOps release after publish?'
-        type: boolean
-        default: false
-        required: false
-      application_name:
-        description: 'Select the Application'
-        required: true
-        type: choice
-        options:
-          - irep
-          - usma
-          - AEBAT
-          - FMPT
-          - GenAIsys
-          - MAT
-          - OPENDOOR
-          - TAP
-          - Touchpoint
-        default: irep
 
 env:
-  QA_ORG_USER: ${{ vars.QA_USERNAME }}
-  QA_ORG_PASSWORD: ${{ secrets.QA_PASSWORD }}
-  QA_ORG_URL: ${{ vars.QA_URL }}
-  AZDO_RELEASE_DEFINITION_ID: AZDO-RELEASE-DEFINITION-ID
-  AZDO_RELEASE_ARTIFACT_ALIAS: abbvie-internal-golden-pipeline-sfdc-testing-main
+        DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+        DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+        DEV_ORG_URL: ${{ vars.DEV_URL }}
+
 
 jobs:
   set_app_id:
     name: Set Application ID
     runs-on: ubuntu-latest
-    outputs:
-      application_id: ${{ steps.set-id.outputs.application_id }}
-      jfrog_repo_path: ${{ steps.set-id.outputs.jfrog_repo_path }}
-    steps:
-      - name: Map application name to ID and jfrog path
-        id: set-id
-        run: |
-          app_name="${{ github.event.inputs.application_name }}"
-          case "$app_name" in
-            irep)
-              app_id="BA0009043"
-              jfrog_path="com-generic-local/IFT/irep"
-              ;;
-            usma)
-              app_id="BA0007551"
-              jfrog_path="com-generic-local/IFT/usma"
-              ;;
-            AEBAT)
-              app_id="BA0001571"
-              jfrog_path="com-generic-local/IFT/AEBAT"
-              ;;
-            FMPT)
-              app_id="BA0009661"
-              jfrog_path="com-generic-local/IFT/FMPT"
-              ;;
-            GenAIsys)
-              app_id="BA0013076"
-              jfrog_path="com-generic-local/IFT/GenAIsys"
-              ;;
-            MAT)
-              app_id="BA0009353"
-              jfrog_path="com-generic-local/IFT/MAT"
-              ;;    
-            OPENDOOR)
-              app_id="BA0010330"
-              jfrog_path="com-generic-local/IFT/OPENDOOR"
-              ;; 
-            TAP)
-              app_id="BA0008901"
-              jfrog_path="com-generic-local/IFT/TAP"
-              ;;
-            Touchpoint)
-              app_id="BA0010057"
-              jfrog_path="com-generic-local/IFT/Touchpoint"
-              ;;              
-            *)
-              echo "❌ Unknown application: $app_name"
-              exit 1
-              ;;
-          esac
 
-          echo "✅ Mapped $app_name to applicationId=$app_id and jfrog_repo_path=$jfrog_path"
-
-          echo "application_id=$app_id" >> $GITHUB_OUTPUT
-          echo "jfrog_repo_path=$jfrog_path" >> $GITHUB_OUTPUT
 
   build_publish:
     name: Build and Publish - Branch ${{ github.event.inputs.src-branch-name }}
@@ -129,7 +54,7 @@ jobs:
     secrets: inherit
 
   deploy_to_qa:
-    name: Deploy to QA Org
+    name: Deploy to Dev Org
     needs: build_publish
     runs-on: ubuntu-latest
     steps:
