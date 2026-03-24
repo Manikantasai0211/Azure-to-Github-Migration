@@ -1,4 +1,4 @@
-name: IFT-DEPLOY-TO-QA
+name: DEPLOY-TO-Dev
 
 on:
   workflow_dispatch:
