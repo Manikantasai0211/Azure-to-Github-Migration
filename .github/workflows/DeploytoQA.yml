@@ -30,39 +30,17 @@ env:
         DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
         DEV_ORG_URL: ${{ vars.DEV_URL }}
 
-
 jobs:
-  set_app_id:
-    name: Set Application ID
-    runs-on: ubuntu-latest
-
-
-  build_publish:
-    name: Build and Publish - Branch ${{ github.event.inputs.src-branch-name }}
-    needs: set_app_id
-    uses: abbvie-enterprise-p/ift/.github/workflows/sfdc-common-ci.yml@testing-snyk
-    with:
-      runs-on: ubuntu-latest
-      ref: ${{ github.event.inputs.src-branch-name }}
-      source-folder: force-app
-      additional-build-artifacts: '["manifest/package.xml"]'
-      jfrog-repo-path: ${{ needs.set_app_id.outputs.jfrog_repo_path }}
-      jfrog-user: svc-com@abbvie.com
-      jfrog-project-key: com
-      artifact-name: IFT-Build
-      applicationId: ${{ needs.set_app_id.outputs.application_id }}
-    secrets: inherit
-
-  deploy_to_qa:
-    name: Deploy to Dev Org
-    needs: build_publish
+  build:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout branch
+      - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.event.inputs.src-branch-name }}
-          fetch-depth: 0
+
+          ref: 'none'
+
+          fetch-depth: 0 # This ensures the full commit history is available
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -78,7 +56,9 @@ jobs:
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
+
           LATEST_COMMIT_ID=$(git log -n 1 origin/${{ github.event.inputs.src-branch-name }} --pretty=format:'%H')
+
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
           if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
@@ -112,28 +92,14 @@ jobs:
           fi
 
           echo "Authenticating QA"
-          sfdx sfpowerkit:auth:login -u $QA_ORG_USER -p $QA_ORG_PASSWORD -r $QA_ORG_URL
+          sfdx force:auth:jwt:grant --clientid $TRN_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_USERNAME --instanceurl $DEV_URL
           echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $QA_ORG_USER -l "$TEST_LEVEL"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"
+          echo "Deployment"
+          sfdx force:source:deploy -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"          
 
-          echo "🎉 Deployment completed successfully"
+          echo "🎉 Deployment completed successfully"         
 
-  trigger_azdo_release:
-    if: ${{ github.event_name != 'pull_request' && github.event.inputs.enable_azdo_release == true }}
-    needs: deploy_to_qa
-    runs-on: ubuntu-latest
-    steps:
-      - name: Check Azure CLI version
-        run: az --version
 
-      - name: Trigger Azure DevOps release
-        env:
-          AZURE_DEVOPS_EXT_PAT: ${{ secrets.AZURE_DEVOPS_RELEASE_TOKEN }}
-          AZDO_RELEASE_DEFINITION_ID: ${{ env.AZDO_RELEASE_DEFINITION_ID }}
-          AZDO_RELEASE_ARTIFACT_ALIAS: ${{ env.AZDO_RELEASE_ARTIFACT_ALIAS }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-        run: |
-          set -e
-          az extension add --name azure-devops || echo "Azure DevOps extension already installed."
-          ARTIFACT_METADATA="${AZDO_RELEASE_ARTIFACT_ALIAS}=${GITHUB_RUN_NUMBER}"
-          az pipelines release create --artifact-metadata-list "$ARTIFACT_METADATA" --definition-id="$AZDO_RELEASE_DEFINITION_ID" --description 'Triggered from Github' --detect false --org https://dev.azure.com/abbvie-devops-lab/ --project 'Abbvie BTS'
+
+lease create --artifact-metadata-list "$ARTIFACT_METADATA" --definition-id="$AZDO_RELEASE_DEFINITION_ID" --description 'Triggered from Github' --detect false --org https://dev.azure.com/abbvie-devops-lab/ --project 'Abbvie BTS'
