@@ -1,9 +1,8 @@
-name: Dev-Org
+name: Deploy-To-Dev
 
 on:
-  push:
-    branches:
-      - DevOrg
+  workflow_dispatch:
+    inputs:
       manual_commit_id:
         description: 'Manual commit ID'
         required: false
@@ -36,7 +35,9 @@ jobs:
         uses: actions/checkout@v4
         with:
 
-          ref: 'none'
+          ref: 'DevOrg'
+
+
 
           fetch-depth: 0 # This ensures the full commit history is available
 
@@ -53,6 +54,8 @@ jobs:
 
       - name: Determine commit IDs and generate delta
         id: commit_delta
+        run: |
+
 
           LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
 
@@ -79,21 +82,26 @@ jobs:
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
+          # Logic for handling test levels
           if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
             TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
             if [[ -z "$TEST_CLASSES" ]]; then
-              echo "Please specify the Test Classes Names to run."
+              echo "❌ Please specify the Test Classes Names to run."
               exit 1
             else
               TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
             fi
+          elif [[ "$TEST_LEVEL" == 'RunAllTestsInOrg' ]]; then
+            TEST_LEVEL="RunAllTestsInOrg"
+          elif [[ "$TEST_LEVEL" == 'RunLocalTests' ]]; then
+            TEST_LEVEL="RunLocalTests"
+          elif [[ "$TEST_LEVEL" == 'NoTestRun' ]]; then
+            TEST_LEVEL="NoTestRun"
           fi
 
-          echo "Authenticating QA"
-          sfdx force:auth:jwt:grant --clientid $TRN_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_USERNAME --instanceurl $DEV_URL
-          echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"
-          echo "Deployment"
-          sfdx force:source:deploy -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"          
 
-          echo "🎉 Deployment completed successfully"          
+          echo "Authenticating PROD"
+          sfdx force:auth:jwt:grant --clientid $PROD_ORG_CLIENTID --jwtkeyfile ./server.key --username $PROD_ORG_USER --instanceurl $PROD_ORG_URL 
+          echo "Validation"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $PROD_ORG_USER -l "$TEST_LEVEL"  
+          echo "🎉 Validation completed successfully"          
