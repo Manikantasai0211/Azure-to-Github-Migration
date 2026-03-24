@@ -1,18 +1,14 @@
-name: DEPLOY-TO-Dev
+name: Deploy-To-Dev
 
 on:
   workflow_dispatch:
     inputs:
-      src-branch-name:
-        description: 'Source branch to checkout in this repository'
-        required: true
-        default: 'DevOrg'
       manual_commit_id:
-        description: 'Manual commit ID for delta calculation'
+        description: 'Manual commit ID'
         required: false
         default: 'default'
       test_level:
-        description: 'Test level for deployment'
+        description: 'Enter type of test case to be checked'
         required: true
         type: choice
         options:
@@ -21,7 +17,7 @@ on:
           - RunLocalTests
         default: NoTestRun
       test_classes:
-        description: 'Test classes to run if RunSpecifiedTests is chosen'
+        description: 'Test classes'
         required: false
         default: ''
 
@@ -38,7 +34,9 @@ jobs:
         uses: actions/checkout@v4
         with:
 
-          ref: 'none'
+          ref: 'DevOrg'
+
+
 
           fetch-depth: 0 # This ensures the full commit history is available
 
@@ -57,7 +55,9 @@ jobs:
         id: commit_delta
         run: |
 
-          LATEST_COMMIT_ID=$(git log -n 1 origin/${{ github.event.inputs.src-branch-name }} --pretty=format:'%H')
+
+          LATEST_COMMIT_ID=$(git log -n 1 origin/Release-19.16 --pretty=format:'%H')
+
 
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
@@ -91,15 +91,8 @@ jobs:
             fi
           fi
 
-          echo "Authenticating QA"
-          sfdx force:auth:jwt:grant --clientid $TRN_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_USERNAME --instanceurl $DEV_URL
+          echo "Authenticating PROD"
+          sfdx force:auth:jwt:grant --clientid $PROD_ORG_CLIENTID --jwtkeyfile ./server.key --username $PROD_ORG_USER --instanceurl $PROD_ORG_URL 
           echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"
-          echo "Deployment"
-          sfdx force:source:deploy -p Delta_pkg/force-app -u $DEV_USERNAME -l "$TEST_LEVEL"          
-
-          echo "🎉 Deployment completed successfully"         
-
-
-
-lease create --artifact-metadata-list "$ARTIFACT_METADATA" --definition-id="$AZDO_RELEASE_DEFINITION_ID" --description 'Triggered from Github' --detect false --org https://dev.azure.com/abbvie-devops-lab/ --project 'Abbvie BTS'
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $PROD_ORG_USER -l "$TEST_LEVEL"  
+          echo "🎉 Validation completed successfully"          
