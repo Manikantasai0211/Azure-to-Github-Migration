@@ -37,6 +37,10 @@ jobs:
         with:
           ref: 'DevOrg'
           fetch-depth: 0 # Ensures full commit history is available
+      - name: Debug repo structure
+        run: |
+          pwd
+          ls -la
 
       - name: Debug repo structure
         run: ls -la
