@@ -41,9 +41,7 @@ jobs:
         run: |
           pwd
           ls -la
-
-      - name: Debug repo structure
-        run: ls -la
+          find . -name "sfdx-project.json"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
