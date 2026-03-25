@@ -57,8 +57,8 @@ jobs:
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
-          # Run from the directory containing sfdx-project.json
-          # If sfdx-project.json is at repo root, do NOT cd into force-app
+          cd force-app
+
           LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
