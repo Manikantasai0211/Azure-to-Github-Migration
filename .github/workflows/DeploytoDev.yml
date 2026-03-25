@@ -100,12 +100,7 @@ jobs:
           fi
 
           echo "Authenticating DEV Org"
-          sfdx force:auth:jwt:grant \
-            --clientid $DEV_ORG_CLIENTID \
-            --jwtkeyfile ./server.key \
-            --username $DEV_ORG_USERNAME \
-            --instanceurl $DEV_ORG_URL
-
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
           echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
-          echo "🎉 Validation completed successfully"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"  
+          echo "🎉 Validation completed successfully"  
