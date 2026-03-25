@@ -56,7 +56,6 @@ jobs:
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
-         cd force-app   # or the directory where sfdx-project.json exists
          LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
@@ -69,6 +68,7 @@ jobs:
          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
 
          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+
 
       - name: Authenticate and deploy
         run: |
