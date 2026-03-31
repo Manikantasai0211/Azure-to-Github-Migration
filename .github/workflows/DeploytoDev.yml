@@ -1,4 +1,4 @@
-name: Deploy-To-QA
+name: Deploy-To-Dev
 
 on:
   workflow_dispatch:
@@ -23,9 +23,10 @@ on:
         default: ''
 
 env:
-  QA_ORG_USER: ${{ vars.QA_USERNAME }}
-  QA_ORG_PASSWORD: ${{ secrets.QA_PASSWORD }}
-  QA_ORG_URL: ${{ vars.QA_URL }}
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+  DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
 
 jobs:
   build:
@@ -34,7 +35,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: 'QAOrg'
+          ref: 'DevOrg'
           fetch-depth: 0
 
       - name: Debug repo structure
@@ -59,7 +60,7 @@ jobs:
         run: |
           cd force-app
 
-          LATEST_COMMIT_ID=$(git log -n 1 origin/QAOrg --pretty=format:'%H')
+          LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
           if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
@@ -77,15 +78,15 @@ jobs:
             exit 1
           fi
 
-      - name: Authenticate QA Org
+      - name: Authenticate Org
         run: |
-          echo "Authenticating QA"
-          sfdx sfpowerkit:auth:login -u $QA_ORG_USER -p $QA_ORG_PASSWORD -r $QA_ORG_URL
+          echo "Authenticating DEV Org"
+          sfdx sfpowerkit:auth:login -u $DEV_ORG_USERNAME -p $DEV_ORG_PASSWORD -r $DEV_ORG_URL
 
       - name: Check Code Coverage
         run: |
           echo "🔍 Running all tests with coverage..."
-          sfdx force:apex:test:run -u $QA_ORG_USER --codecoverage --resultformat json --outputdir test-results --wait 30
+          sfdx force:apex:test:run -u $DEV_ORG_USERNAME --codecoverage --resultformat json --outputdir test-results --wait 30
 
           echo "🔍 Validating per-class coverage..."
           LOW_COVERAGE=$(jq '.coverage.coverageByClass[] | select(.percent < 75)' test-results/test-result.json)
@@ -98,7 +99,7 @@ jobs:
             echo "✅ All classes/triggers have >=75% coverage."
           fi
 
-      - name: Deploy to QA Org
+      - name: Deploy to Org
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
@@ -109,10 +110,10 @@ jobs:
               echo "❌ Please specify the Test Classes Names to run."
               exit 1
             else
-              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $QA_ORG_USER -l RunSpecifiedTests -r $TEST_CLASSES
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
             fi
           else
-            sfdx force:source:deploy -c -p Delta_pkg/force-app -u $QA_ORG_USER -l $TEST_LEVEL
+            sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l $TEST_LEVEL
           fi
 
           echo "🎉 Validation completed successfully"
