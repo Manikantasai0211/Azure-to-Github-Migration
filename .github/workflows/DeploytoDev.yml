@@ -99,7 +99,7 @@ jobs:
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
           sfdx force:apex:test:run \
-            --tests "$CHANGED_TEST_CLASSES" \
+            --tests "$CHANGED_TEST_CLASSES"
             --codecoverage \
             --resultformat json \
             --outputdir test-results \
