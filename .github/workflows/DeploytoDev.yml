@@ -94,7 +94,7 @@ jobs:
           fi
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
-          sfdx force:apex:test:run -u $DEV_ORG_USERNAME -r $CHANGED_CLASSES --codecoverage --resultformat json --outputdir test-results --wait 30
+          sf apex run test --tests $(echo $CHANGED_TEST_CLASSES | tr ' ' ',') --code-coverage --result-format json --output-dir test-results --target-org $DEV_ORG_USERNAME --wait 30
 
           echo "🔍 Validating coverage for changed classes..."
           for CLASS in $CHANGED_CLASSES; do
