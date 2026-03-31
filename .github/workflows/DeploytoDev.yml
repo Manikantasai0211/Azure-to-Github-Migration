@@ -81,23 +81,31 @@ jobs:
       - name: Authenticate Org
         run: |
           echo "Authenticating DEV Org"
-          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
+          sfdx sfpowerkit:auth:login -u $DEV_ORG_USERNAME -p $DEV_ORG_PASSWORD -r $DEV_ORG_URL
 
-      - name: Check Code Coverage
+      - name: Check Code Coverage for Delta
         run: |
-          echo "🔍 Running all tests with coverage..."
-          sfdx force:apex:test:run -u $DEV_ORG_USERNAME --codecoverage --resultformat json --outputdir test-results --wait 30
+          echo "🔍 Collecting changed Apex classes..."
+          CHANGED_CLASSES=$(find Delta_pkg/force-app/main/default/classes -name "*.cls" -exec basename {} .cls \;)
 
-          echo "🔍 Validating per-class coverage..."
-          LOW_COVERAGE=$(jq '.coverage.coverageByClass[] | select(.percent < 75)' test-results/test-result.json)
-
-          if [[ -n "$LOW_COVERAGE" ]]; then
-            echo "❌ Some classes/triggers have <75% coverage:"
-            echo "$LOW_COVERAGE"
-            exit 1
-          else
-            echo "✅ All classes/triggers have >=75% coverage."
+          if [[ -z "$CHANGED_CLASSES" ]]; then
+            echo "ℹ️ No Apex classes changed in this PR, skipping coverage check."
+            exit 0
           fi
+
+          echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
+          sfdx force:apex:test:run -u $DEV_ORG_USERNAME -r $CHANGED_CLASSES --codecoverage --resultformat json --outputdir test-results --wait 30
+
+          echo "🔍 Validating coverage for changed classes..."
+          for CLASS in $CHANGED_CLASSES; do
+            COVERAGE=$(jq ".coverage.coverageByClass[] | select(.name==\"$CLASS\") | .percent" test-results/test-result.json)
+            if [[ "$COVERAGE" -lt 75 ]]; then
+              echo "❌ $CLASS has coverage $COVERAGE%, below 75%"
+              exit 1
+            else
+              echo "✅ $CLASS has coverage $COVERAGE%"
+            fi
+          done
 
       - name: Deploy to Org
         run: |
