@@ -86,7 +86,7 @@ jobs:
       - name: Check Code Coverage for Delta
         run: |
           echo "🔍 Collecting changed Apex classes..."
-          CHANGED_CLASSES=$(find Delta_pkg/force-app/main/default/classes -name "*.cls" -exec basename {} .cls \;)
+          CHANGED_CLASSES=$(find force-app/main/default/classes -name "*.cls" -exec basename {} .cls \;)
 
           if [[ -z "$CHANGED_CLASSES" ]]; then
             echo "ℹ️ No Apex classes changed in this PR, skipping coverage check."
