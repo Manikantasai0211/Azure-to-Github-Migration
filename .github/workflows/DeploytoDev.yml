@@ -47,18 +47,14 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '18.6.0'
+          node-version: '16.x'
 
 
-      - name: Install SFDX CLI and SF CLI with plugins
+      - name: Install SFDX CLI and plugins
         run: |
-          npm install --global @salesforce/cli
-          sf --version
+          npm install sfdx-cli --global
           sfdx --version
-
           echo 'y' | sfdx plugins:install sfpowerkit
-
-          npm install --global rimraf
           
       - name: Determine commit IDs and generate delta
         id: commit_delta
@@ -102,12 +98,12 @@ jobs:
           fi
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
-          sf apex run test \
+          sfdx force:apex:test:run \
           --tests $(echo $CHANGED_TEST_CLASSES | tr ' ' ',') \
-          --code-coverage \
-          --result-format json \
-          --output-dir test-results \
-          --target-org $DEV_ORG_USERNAME \
+          --codecoverage \
+          --resultformat json \
+          --outputdir test-results \
+          --targetusername $DEV_ORG_USERNAME \
           --wait 30
           
           echo "🔍 Validating coverage for changed classes..."
