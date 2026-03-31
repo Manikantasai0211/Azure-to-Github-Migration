@@ -1,136 +1,216 @@
 name: Deploy
-
+ 
 on:
-  workflow_call:
+
+  workflow_dispatch:
+
     inputs:
-      runs-on:
-        description: Platform to execute on
-        type: string
-        default: ubuntu-latest
+
+      manual_commit_id:
+
+        description: 'Manual commit ID'
+
         required: false
 
-      ref:
-        description: Git reference (branch name) to detect changes
-        type: string
-        default: ${{ github.ref }}
-        required: false
-
-      source-folder:
-        description: The folder path containing Salesforce source
-        type: string
-        default: force-app
-        required: true
-
-      artifact-name:
-        description: Name of the build artifact to publish
-        type: string
-        required: true
-
-      applicationId:
-        description: Business Application ID (for logging/traceability)
-        required: true
-        type: string
+        default: 'default'
 
       test_level:
-        description: "Choose test level"
-        type: string
-        default: RunLocalTests
-        required: false
+
+        description: 'Enter type of test case to be checked'
+
+        required: true
+
+        type: choice
+
+        options:
+
+          - NoTestRun
+
+          - RunSpecifiedTests
+
+          - RunLocalTests
+
+          - RunAllTestsInOrg
+
+        default: RunSpecifiedTests
 
       test_classes:
-        description: "Comma-separated test classes (only for RunSpecifiedTests)"
-        type: string
-        default: ""
+
+        description: 'Test classes'
+
         required: false
 
-    secrets:
-      DEV_ORG_CLIENTID:
-        required: true
-        description: Salesforce Connected App Client ID
-      DEV_ORG_USERNAME:
-        required: true
-        description: Salesforce Org Username
-      DEV_ORG_URL:
-        required: true
-        description: Salesforce Org URL
-      SERVER_KEY:
-        required: true
-        description: JWT Server Key for Salesforce Auth
+        default: ''
+ 
+env:
 
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+
+  DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+ 
 jobs:
-  build_publish:
-    runs-on: ${{ inputs.runs-on }}
+
+  build:
+
+    runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout Code
+
+      - name: Checkout code
+
         uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref }}
-          fetch-depth: 0
 
+        with:
+
+          ref: 'feature'
+
+          fetch-depth: 0 # Ensures full commit history is available
+ 
+      - name: Debug repo structure
+
+        run: |
+
+          pwd
+
+          ls -la
+
+          find . -name "sfdx-project.json"
+ 
       - name: Setup Node.js
+
         uses: actions/setup-node@v4
+
         with:
+
           node-version: '16.x'
+ 
+      - name: Install SFDX CLI and plugins
 
-      - name: Install Salesforce CLI and Plugins
         run: |
+
           npm install sfdx-cli --global
+
           sfdx --version
+
           echo 'y' | sfdx plugins:install sfpowerkit
+ 
+      - name: Determine commit IDs and generate delta
 
-      - name: Generate Delta Package
+        id: commit_delta
+
         run: |
-          LATEST_COMMIT_ID=$(git log -n 1 --pretty=format:'%H')
-          PREV_COMMIT_ID=$(git log --format="%P" -n 1 | cut -d ' ' -f1)
 
-          echo "Latest Commit = $LATEST_COMMIT_ID"
-          echo "Previous Commit = $PREV_COMMIT_ID"
+          cd force-app
+ 
+          LATEST_COMMIT_ID=$(git log -n 1 origin/feature --pretty=format:'%H')
 
-          sfdx sfpowerkit:project:diff -r $PREV_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
+ 
+          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
 
+            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1)
+
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+
+          fi
+ 
+          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
+
+          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
+ 
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+ 
           if [ ! -d "Delta_pkg" ]; then
+
             echo "❌ No diff found, exiting."
-            exit 1
-          fi
 
-      - name: Authenticate Salesforce Org
+            exit 1
+
+          fi
+ 
+      - name: Authenticate DEV Org
+
         run: |
+
+          echo "Authenticating DEV Org"
+
           echo "${{ secrets.SERVER_KEY }}" > server.key
-          sfdx force:auth:jwt:grant \
-            --clientid ${{ secrets.DEV_ORG_CLIENTID }} \
-            --jwtkeyfile ./server.key \
-            --username ${{ secrets.DEV_ORG_USERNAME }} \
-            --instanceurl ${{ secrets.DEV_ORG_URL }}
 
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL
+ 
       - name: Check Code Coverage
+
         run: |
+
           echo "🔍 Running all tests with coverage..."
-          sfdx force:apex:test:run -u ${{ secrets.DEV_ORG_USERNAME }} --codecoverage --resultformat json --outputdir test-results --wait 30
 
+          sfdx force:apex:test:run -u $DEV_ORG_USERNAME --codecoverage --resultformat json --outputdir test-results --wait 30
+ 
           echo "🔍 Validating per-class coverage..."
+
           LOW_COVERAGE=$(jq '.coverage.coverageByClass[] | select(.percent < 75)' test-results/test-result.json)
-
+ 
           if [[ -n "$LOW_COVERAGE" ]]; then
+
             echo "❌ Some classes/triggers have <75% coverage:"
+
             echo "$LOW_COVERAGE"
+
             exit 1
+
           else
+
             echo "✅ All classes/triggers have >=75% coverage."
-          fi
 
-      - name: Deploy to Salesforce Org
+          fi
+ 
+      - name: Deploy to Dev Org
+
         run: |
-          TEST_LEVEL="${{ inputs.test_level }}"
-          TEST_CLASSES="${{ inputs.test_classes }}"
 
-          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+          TEST_LEVEL="${{ github.event.inputs.test_level }}"
+
+          TEST_CLASSES="${{ github.event.inputs.test_classes }}"
+ 
+          # Logic for handling test levels
+
+          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
+
+            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+
             if [[ -z "$TEST_CLASSES" ]]; then
-              echo "❌ Please specify test classes when using RunSpecifiedTests"
-              exit 1
-            fi
-            sfdx force:source:deploy -c -p Delta_pkg/force-app -u ${{ secrets.DEV_ORG_USERNAME }} -l RunSpecifiedTests -r $TEST_CLASSES
-          else
-            sfdx force:source:deploy -c -p Delta_pkg/force-app -u ${{ secrets.DEV_ORG_USERNAME }} -l $TEST_LEVEL
-          fi
 
-          echo "🎉 Deployment validation completed successfully"
+              echo "❌ Please specify the Test Classes Names to run."
+
+              exit 1
+
+            else
+
+              TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
+
+            fi
+
+          elif [[ "$TEST_LEVEL" == 'RunAllTestsInOrg' ]]; then
+
+            TEST_LEVEL="RunAllTestsInOrg"
+
+          elif [[ "$TEST_LEVEL" == 'RunLocalTests' ]]; then
+
+            TEST_LEVEL="RunLocalTests"
+
+          elif [[ "$TEST_LEVEL" == 'NoTestRun' ]]; then
+
+            TEST_LEVEL="NoTestRun"
+
+          fi
+ 
+          echo "Validation"
+
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
+
+          echo "🎉 Validation completed successfully"
+ 
