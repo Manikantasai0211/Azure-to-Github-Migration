@@ -52,13 +52,9 @@ jobs:
 
       - name: Install SFDX CLI and SF CLI with plugins
         run: |
-          # Install SFDX CLI
-          npm install sfdx-cli --global
-          sfdx --version
-
-          # Install SF CLI (new unified CLI)
           npm install --global @salesforce/cli
           sf --version
+          sfdx --version
 
           echo 'y' | sfdx plugins:install sfpowerkit
           
