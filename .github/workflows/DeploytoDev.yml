@@ -81,7 +81,7 @@ jobs:
       - name: Authenticate Org
         run: |
           echo "Authenticating DEV Org"
-          sfdx sfpowerkit:auth:login -u $DEV_ORG_USERNAME -p $DEV_ORG_PASSWORD -r $DEV_ORG_URL
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
 
       - name: Check Code Coverage
         run: |
