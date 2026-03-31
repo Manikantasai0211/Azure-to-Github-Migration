@@ -57,6 +57,8 @@ jobs:
           sfdx --version
 
           echo 'y' | sfdx plugins:install sfpowerkit
+
+          npm install --global rimraf
           
       - name: Determine commit IDs and generate delta
         id: commit_delta
