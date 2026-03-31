@@ -49,17 +49,13 @@ jobs:
         with:
           node-version: '16.x'
 
-      - name: Install SFDX CLI and plugins
-        run: |
-          npm install sfdx-cli --global
-          sfdx --version
-          echo 'y' | sfdx plugins:install sfpowerkit
 
       - name: Install Salesforce CLI (sf)
         run: |
           npm install @salesforce/cli --global
           sf --version
-
+          echo 'y' | sfdx plugins:install sfpowerkit
+          
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
