@@ -72,7 +72,7 @@ jobs:
           echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
           echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
 
-          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+          sf powerkit project diff --revisionfrom $MANUAL_COMMIT_ID --revisionto $LATEST_COMMIT_ID --output Delta_pkg
 
           if [ ! -d "Delta_pkg" ]; then
             echo "❌ No diff found, exiting."
