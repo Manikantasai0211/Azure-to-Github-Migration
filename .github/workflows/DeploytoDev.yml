@@ -50,10 +50,10 @@ jobs:
           node-version: '16.x'
 
 
-      - name: Install Salesforce CLI (sf)
+      - name: Install SFDX CLI and plugins
         run: |
-          npm install @salesforce/cli --global
-          sf --version
+          npm install sfdx-cli --global
+          sfdx --version
           echo 'y' | sfdx plugins:install sfpowerkit
           
       - name: Determine commit IDs and generate delta
@@ -72,7 +72,10 @@ jobs:
           echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
           echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
 
-          sf powerkit project diff --revisionfrom $MANUAL_COMMIT_ID --revisionto $LATEST_COMMIT_ID --output Delta_pkg
+          sfdx sfpowerkit:project:diff \
+          --revisionfrom $MANUAL_COMMIT_ID \
+          --revisionto $LATEST_COMMIT_ID \
+          --output Delta_pkg
 
           if [ ! -d "Delta_pkg" ]; then
             echo "❌ No diff found, exiting."
@@ -95,8 +98,14 @@ jobs:
           fi
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
-          sf apex run test --tests $(echo $CHANGED_TEST_CLASSES | tr ' ' ',') --code-coverage --result-format json --output-dir test-results --target-org $DEV_ORG_USERNAME --wait 30
-
+          sfdx force:apex:test:run \
+          --tests $(echo $CHANGED_TEST_CLASSES | tr ' ' ',') \
+          --codecoverage \
+          --resultformat json \
+          --outputdir test-results \
+          --targetusername $DEV_ORG_USERNAME \
+          --wait 30
+          
           echo "🔍 Validating coverage for changed classes..."
           for CLASS in $CHANGED_CLASSES; do
             COVERAGE=$(jq ".coverage.coverageByClass[] | select(.name==\"$CLASS\") | .percent" test-results/test-result.json)
