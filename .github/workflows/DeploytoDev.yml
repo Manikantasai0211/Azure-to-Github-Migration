@@ -36,7 +36,8 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: 'DevOrg'
-          fetch-depth: 0 # Ensures full commit history is available
+          fetch-depth: 0
+
       - name: Debug repo structure
         run: |
           pwd
@@ -77,30 +78,43 @@ jobs:
             exit 1
           fi
 
-      - name: Authenticate and deploy
+      - name: Authenticate Org
+        run: |
+          echo "Authenticating DEV Org"
+          echo "${{ secrets.SERVER_KEY }}" > server.key
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL
+
+      - name: Check Code Coverage
+        run: |
+          echo "🔍 Running all tests with coverage..."
+          sfdx force:apex:test:run -u $DEV_ORG_USERNAME --codecoverage --resultformat json --outputdir test-results --wait 30
+
+          echo "🔍 Validating per-class coverage..."
+          LOW_COVERAGE=$(jq '.coverage.coverageByClass[] | select(.percent < 75)' test-results/test-result.json)
+
+          if [[ -n "$LOW_COVERAGE" ]]; then
+            echo "❌ Some classes/triggers have <75% coverage:"
+            echo "$LOW_COVERAGE"
+            exit 1
+          else
+            echo "✅ All classes/triggers have >=75% coverage."
+          fi
+
+      - name: Deploy to Org
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
-          # Logic for handling test levels
           if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
             TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
             if [[ -z "$TEST_CLASSES" ]]; then
               echo "❌ Please specify the Test Classes Names to run."
               exit 1
             else
-              TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
             fi
-          elif [[ "$TEST_LEVEL" == 'RunAllTestsInOrg' ]]; then
-            TEST_LEVEL="RunAllTestsInOrg"
-          elif [[ "$TEST_LEVEL" == 'RunLocalTests' ]]; then
-            TEST_LEVEL="RunLocalTests"
-          elif [[ "$TEST_LEVEL" == 'NoTestRun' ]]; then
-            TEST_LEVEL="NoTestRun"
+          else
+            sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l $TEST_LEVEL
           fi
 
-          echo "Authenticating DEV Org"
-          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
-          echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"  
-          echo "🎉 Validation completed successfully"  
+          echo "🎉 Validation completed successfully"
