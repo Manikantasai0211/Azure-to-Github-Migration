@@ -55,6 +55,11 @@ jobs:
           sfdx --version
           echo 'y' | sfdx plugins:install sfpowerkit
 
+      - name: Install Salesforce CLI (sf)
+        run: |
+          npm install @salesforce/cli --global
+          sf --version
+
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
