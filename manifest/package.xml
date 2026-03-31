@@ -4,7 +4,7 @@ http://soap.sforce.com/2006/04/metadata">
 <members>LightningLoginFormController</members>
 <members>ChangePasswordController</members>
 <members>SiteLoginControllerTest</members>
-<name>ApexClass </name>
+<name>ApexClass</name>
 </types>
 <version>62.0</version>
 </Package> 
