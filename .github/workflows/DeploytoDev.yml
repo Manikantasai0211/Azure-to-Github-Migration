@@ -50,10 +50,16 @@ jobs:
           node-version: '16.x'
 
 
-      - name: Install SFDX CLI and plugins
+      - name: Install SFDX CLI and SF CLI with plugins
         run: |
+          # Install SFDX CLI
           npm install sfdx-cli --global
           sfdx --version
+
+          # Install SF CLI (new unified CLI)
+          npm install --global @salesforce/cli
+          sf --version
+
           echo 'y' | sfdx plugins:install sfpowerkit
           
       - name: Determine commit IDs and generate delta
@@ -98,12 +104,12 @@ jobs:
           fi
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
-          sfdx force:apex:test:run \
+          sf apex run test \
           --tests $(echo $CHANGED_TEST_CLASSES | tr ' ' ',') \
-          --codecoverage \
-          --resultformat json \
-          --outputdir test-results \
-          --targetusername $DEV_ORG_USERNAME \
+          --code-coverage \
+          --result-format json \
+          --output-dir test-results \
+          --target-org $DEV_ORG_USERNAME \
           --wait 30
           
           echo "🔍 Validating coverage for changed classes..."
