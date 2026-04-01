@@ -85,11 +85,6 @@ jobs:
             exit 1
           fi
 
-      - name: Authenticate Org
-        run: |
-          echo "Authenticating DEV Org"
-          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
-
       - name: Authenticate and deploy
         id: deploy_step
         run: |
@@ -130,7 +125,7 @@ jobs:
           echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
 
       - name: Show Deploy Report
-        if: always()   # run even if deploy failed
+        if: always()
         run: |
           echo "Fetching deploy report for $DEPLOY_ID..."
           sfdx force:source:deploy:report -i $DEPLOY_ID -u $DEV_ORG_USERNAME
