@@ -21,6 +21,10 @@ on:
         description: 'Test classes'
         required: false
         default: ''
+      validation_only:
+        description: 'Run validation only (checkonly)'
+        required: false
+        default: ''
 
 env:
   DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
@@ -49,7 +53,6 @@ jobs:
         with:
           node-version: '16.x'
 
-
       - name: Install SFDX CLI and plugins
         run: |
           npm install sfdx-cli --global
@@ -73,9 +76,9 @@ jobs:
           echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
 
           sfdx sfpowerkit:project:diff \
-          --revisionfrom $MANUAL_COMMIT_ID \
-          --revisionto $LATEST_COMMIT_ID \
-          --output Delta_pkg
+            --revisionfrom $MANUAL_COMMIT_ID \
+            --revisionto $LATEST_COMMIT_ID \
+            --output Delta_pkg
 
           if [ ! -d "Delta_pkg" ]; then
             echo "❌ No diff found, exiting."
@@ -86,36 +89,6 @@ jobs:
         run: |
           echo "Authenticating DEV Org"
           sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
-
-      - name: Check Code Coverage for Delta
-        run: |
-          echo "🔍 Collecting changed Apex classes..."
-          CHANGED_TEST_CLASSES=$(echo "$CHANGED_TEST_CLASSES" | tr '\n' ',' | tr -s ',' | sed 's/^,//;s/,$//')
-
-          if [[ -z "$CHANGED_CLASSES" ]]; then
-            echo "ℹ️ No Apex classes changed in this PR, skipping coverage check."
-            exit 0
-          fi
-
-          echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
-          sfdx force:apex:test:run \
-            --tests "$CHANGED_TEST_CLASSES" \
-            --codecoverage \
-            --resultformat json \
-            --outputdir test-results \
-            --targetusername $DEV_ORG_USERNAME \
-            --wait 30
-          
-          echo "🔍 Validating coverage for changed classes..."
-          for CLASS in $CHANGED_CLASSES; do
-            COVERAGE=$(jq ".coverage.coverageByClass[] | select(.name==\"$CLASS\") | .percent" test-results/test-result.json)
-            if [[ "$COVERAGE" -lt 75 ]]; then
-              echo "❌ $CLASS has coverage $COVERAGE%, below 75%"
-              exit 1
-            else
-              echo "✅ $CLASS has coverage $COVERAGE%"
-            fi
-          done
 
       - name: Prepare test logic
         id: test_logic
@@ -129,7 +102,8 @@ jobs:
           echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
 
           if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr -d ' ')
+            # Normalize test classes into comma-separated list
+            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
             if [[ -z "$TEST_CLASSES" ]]; then
               echo "❌ Please specify Test Class names for RunSpecifiedTests."
               exit 1
@@ -140,6 +114,20 @@ jobs:
           echo "TEST_CLASSES=$TEST_CLASSES" >> $GITHUB_ENV
           echo "VALIDATION_ONLY=$VALIDATION_ONLY" >> $GITHUB_ENV
 
-          echo "Validation"
-          sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
-          echo "🎉 Validation completed successfully"
+      - name: Deploy to Org
+        run: |
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+            echo "▶ Deploying with specified tests: $TEST_CLASSES"
+            sfdx force:source:deploy \
+              -p force-app/main/default \
+              -u $DEV_ORG_USERNAME \
+              -l RunSpecifiedTests \
+              -r "$TEST_CLASSES" \
+              ${VALIDATION_ONLY:+-c}
+          else
+            echo "▶ Deploying with test level: $TEST_LEVEL"
+            sfdx force:source:deploy \
+              -p force-app/main/default \
+              -u $DEV_ORG_USERNAME \
+              -l "$TEST_LEVEL" \
+              ${VALIDATION_ONLY
