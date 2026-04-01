@@ -91,6 +91,7 @@ jobs:
           sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
 
       - name: Authenticate and deploy
+        id: deploy_step
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
@@ -101,47 +102,37 @@ jobs:
           echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
 
           if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-          # Normalize test classes: flatten newlines, strip spaces, ensure comma-separated
-          TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
-
-          if [[ -z "$TEST_CLASSES" ]]; then
-          echo "❌ Please specify Test Class names for RunSpecifiedTests."
-            exit 1
+            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
+            if [[ -z "$TEST_CLASSES" ]]; then
+              echo "❌ Please specify Test Class names for RunSpecifiedTests."
+              exit 1
+            fi
+            echo "▶ Deploying with specified tests: $TEST_CLASSES"
+            DEPLOY_OUTPUT=$(sfdx force:source:deploy \
+              -p force-app/main/default \
+              -u "$DEV_ORG_USERNAME" \
+              -l RunSpecifiedTests \
+              -r "$TEST_CLASSES" \
+              ${VALIDATION_ONLY:+-c} --json)
+          else
+            DEPLOY_OUTPUT=$(sfdx force:source:deploy \
+              -p force-app/main/default \
+              -u "$DEV_ORG_USERNAME" \
+              -l "$TEST_LEVEL" \
+              ${VALIDATION_ONLY:+-c} --json)
           fi
 
-          echo "▶ Deploying with specified tests: $TEST_CLASSES"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunSpecifiedTests \
-            -r "$TEST_CLASSES" \
-            ${VALIDATION_ONLY:+-c}
+          echo "$DEPLOY_OUTPUT" > deploy-result.json
+          DEPLOY_ID=$(jq -r '.result.id' deploy-result.json)
+          echo "Deploy ID: $DEPLOY_ID"
+          echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
 
-          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
-          echo "▶ Deploying with RunLocalTests (default for production)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunLocalTests \
-            ${VALIDATION_ONLY:+-c}
-
-          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
-            echo "▶ Deploying with RunAllTestsInOrg (includes managed package tests)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunAllTestsInOrg \
-            ${VALIDATION_ONLY:+-c}
-
-          elif [[ "$TEST_LEVEL" == "NoTestRun" ]]; then
-          echo "▶ Deploying with NoTestRun (only allowed in dev/sandbox orgs)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l NoTestRun \
-            ${VALIDATION_ONLY:+-c}
-          fi
-
+      - name: Show Deploy Report
+        if: always()   # run even if deploy failed
+        run: |
+          echo "Fetching deploy report for $DEPLOY_ID..."
+          sfdx force:source:deploy:report -i $DEPLOY_ID -u $DEV_ORG_USERNAME
+          
           echo "Validation"
           sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
           echo "🎉 Validation completed successfully"
