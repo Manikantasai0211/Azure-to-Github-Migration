@@ -141,5 +141,5 @@ jobs:
           echo "VALIDATION_ONLY=$VALIDATION_ONLY" >> $GITHUB_ENV
 
           echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
+          sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
           echo "🎉 Validation completed successfully"
