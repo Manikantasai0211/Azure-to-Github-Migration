@@ -128,10 +128,10 @@ jobs:
               echo "❌ Please specify the Test Classes Names to run."
               exit 1
             else
-              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
+              sfdx force:source:deploy -c -p force-app -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
             fi
           else
-            sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l $TEST_LEVEL
+            sfdx force:source:deploy -c -p force-app -u $DEV_ORG_USERNAME -l $TEST_LEVEL
           fi
 
           echo "🎉 Validation completed successfully"
