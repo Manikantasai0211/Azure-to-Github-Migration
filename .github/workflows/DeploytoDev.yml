@@ -113,13 +113,15 @@ jobs:
               -u "$DEV_ORG_USERNAME" \
               -l RunSpecifiedTests \
               -r "$TEST_CLASSES" \
-              ${VALIDATION_ONLY:+-c} --json)
+              ${VALIDATION_ONLY:+-c} \
+              --json)
           else
             DEPLOY_OUTPUT=$(sfdx force:source:deploy \
               -p force-app/main/default \
               -u "$DEV_ORG_USERNAME" \
               -l "$TEST_LEVEL" \
-              ${VALIDATION_ONLY:+-c} --json)
+              ${VALIDATION_ONLY:+-c} \
+              --json)
           fi
 
           echo "$DEPLOY_OUTPUT" > deploy-result.json
