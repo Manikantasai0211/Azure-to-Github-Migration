@@ -90,7 +90,7 @@ jobs:
       - name: Check Code Coverage for Delta
         run: |
           echo "🔍 Collecting changed Apex classes..."
-          CHANGED_CLASSES=$(find force-app/main/default/classes -name "*.cls" -exec basename {} .cls \;)
+          CHANGED_TEST_CLASSES=$(echo "$CHANGED_TEST_CLASSES" | tr '\n' ',' | tr -s ',' | sed 's/^,//;s/,$//')
 
           if [[ -z "$CHANGED_CLASSES" ]]; then
             echo "ℹ️ No Apex classes changed in this PR, skipping coverage check."
@@ -99,7 +99,7 @@ jobs:
 
           echo "🔍 Running tests for changed classes: $CHANGED_CLASSES"
           sfdx force:apex:test:run \
-            --tests "$CHANGED_CLASSES" \
+            --tests "$CHANGED_TEST_CLASSES" \
             --codecoverage \
             --resultformat json \
             --outputdir test-results \
