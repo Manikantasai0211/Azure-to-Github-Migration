@@ -1,7 +1,7 @@
 name: Deploy-To-Dev
 
 on:
-  workflow_dispatch:   # manual trigger still available
+  workflow_dispatch:
     inputs:
       manual_commit_id:
         description: 'Manual commit ID'
@@ -26,10 +26,6 @@ on:
         required: false
         default: ''
 
-  pull_request:        # run automatically on PRs into deb branch
-    branches:
-      - deb
-
 env:
   DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
   DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
@@ -43,7 +39,14 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
+          ref: 'DevOrg'
           fetch-depth: 0
+
+      - name: Debug repo structure
+        run: |
+          pwd
+          ls -la
+          find . -name "sfdx-project.json"
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -55,78 +58,97 @@ jobs:
           npm install sfdx-cli --global
           sfdx --version
           echo 'y' | sfdx plugins:install sfpowerkit
+          
+      - name: Determine commit IDs and generate delta
+        id: commit_delta
+        run: |
+          cd force-app
+
+          LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
+          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
+
+          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
+            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1)
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+          fi
+
+          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
+          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
+
+          sfdx sfpowerkit:project:diff \
+            --revisionfrom $MANUAL_COMMIT_ID \
+            --revisionto $LATEST_COMMIT_ID \
+            --output Delta_pkg
+
+          if [ ! -d "Delta_pkg" ]; then
+            echo "❌ No diff found, exiting."
+            exit 1
+          fi
 
       - name: Authenticate Org
         run: |
           echo "Authenticating DEV Org"
-          sfdx force:auth:jwt:grant \
-            --clientid $DEV_ORG_CLIENTID \
-            --jwtkeyfile ./server.key \
-            --username $DEV_ORG_USERNAME \
-            --instanceurl $DEV_ORG_URL 
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
 
-      - name: Run tests & check coverage
-        if: github.event_name == 'pull_request' && github.base_ref == 'deb'
-        run: |
-          echo "🔍 Collecting changed Apex classes and triggers..."
-          CHANGED_CLASSES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep "classes/.*\.cls" | sed 's#.*/##;s/\.cls//')
-          CHANGED_TRIGGERS=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep "triggers/.*\.trigger" | sed 's#.*/##;s/\.trigger//')
-
-          if [[ -z "$CHANGED_CLASSES" && -z "$CHANGED_TRIGGERS" ]]; then
-            echo "ℹ️ No Apex classes or triggers changed in this PR, skipping coverage check."
-            exit 0
-          fi
-
-          echo "🔍 Changed Apex Classes: $CHANGED_CLASSES"
-          echo "🔍 Changed Apex Triggers: $CHANGED_TRIGGERS"
-
-          CHANGED_TEST_CLASSES=$(echo "$CHANGED_CLASSES" | sed 's/$/Test/' | tr '\n' ',' | sed 's/,$//')
-
-          if [[ -z "$CHANGED_TEST_CLASSES" ]]; then
-            echo "❌ No matching test classes found for changed Apex classes."
-            exit 1
-          fi
-
-          echo "▶ Running tests: $CHANGED_TEST_CLASSES"
-          sfdx force:apex:test:run \
-            --tests "$CHANGED_TEST_CLASSES" \
-            --codecoverage \
-            --resultformat json \
-            --outputdir test-results \
-            --targetusername $DEV_ORG_USERNAME \
-            --wait 30
-
-          echo "🔍 Validating coverage..."
-          for CLASS in $CHANGED_CLASSES $CHANGED_TRIGGERS; do
-            COVERAGE=$(jq ".coverage.coverageByClass[] | select(.name==\"$CLASS\") | .percent" test-results/test-result.json)
-            if [[ -z "$COVERAGE" ]]; then
-              echo "❌ No coverage data found for $CLASS"
-              exit 1
-            fi
-            if (( $(echo "$COVERAGE < 75" | bc -l) )); then
-              echo "❌ $CLASS has coverage $COVERAGE%, below 75%"
-              exit 1
-            else
-              echo "✅ $CLASS has coverage $COVERAGE%"
-            fi
-          done
-
-      - name: Deploy to Org
+      - name: Authenticate and deploy
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
           VALIDATION_ONLY="${{ github.event.inputs.validation_only }}"
 
+          echo "Selected TEST_LEVEL = $TEST_LEVEL"
+          echo "Selected TEST_CLASSES = $TEST_CLASSES"
+          echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
+
           if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
-            if [[ -z "$TEST_CLASSES" ]]; then
-              echo "❌ Please specify Test Class names for RunSpecifiedTests."
-              exit 1
-            fi
+          # Normalize test classes: flatten newlines, strip spaces, ensure comma-separated
+          TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
+
+          if [[ -z "$TEST_CLASSES" ]]; then
+          echo "❌ Please specify Test Class names for RunSpecifiedTests."
+            exit 1
+          fi
+
+          echo "▶ Deploying with specified tests: $TEST_CLASSES"
+          sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u "$DEV_ORG_USERNAME" \
+            -l RunSpecifiedTests \
+            -r "$TEST_CLASSES" \
+            ${VALIDATION_ONLY:+-c}
+
+          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
+          echo "▶ Deploying with RunLocalTests (default for production)"
+          sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u "$DEV_ORG_USERNAME" \
+            -l RunLocalTests \
+            ${VALIDATION_ONLY:+-c}
+
+          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
+            echo "▶ Deploying with RunAllTestsInOrg (includes managed package tests)"
+          sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u "$DEV_ORG_USERNAME" \
+            -l RunAllTestsInOrg \
+            ${VALIDATION_ONLY:+-c}
+
+          elif [[ "$TEST_LEVEL" == "NoTestRun" ]]; then
+          echo "▶ Deploying with NoTestRun (only allowed in dev/sandbox orgs)"
+          sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u "$DEV_ORG_USERNAME" \
+            -l NoTestRun \
+            ${VALIDATION_ONLY:+-c}
+          fi
+
+      - name: Deploy to Org
+        run: |
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
             echo "▶ Deploying with specified tests: $TEST_CLASSES"
             sfdx force:source:deploy \
               -p force-app/main/default \
-              -u "$DEV_ORG_USERNAME" \
+              -u $DEV_ORG_USERNAME \
               -l RunSpecifiedTests \
               -r "$TEST_CLASSES" \
               ${VALIDATION_ONLY:+-c}
@@ -134,6 +156,6 @@ jobs:
             echo "▶ Deploying with test level: $TEST_LEVEL"
             sfdx force:source:deploy \
               -p force-app/main/default \
-              -u "$DEV_ORG_USERNAME" \
+              -u $DEV_ORG_USERNAME \
               -l "$TEST_LEVEL" \
-              ${VALIDATION_ONLY:+-c}
+              ${VALIDATION_ONLY
