@@ -117,31 +117,29 @@ jobs:
             fi
           done
 
-      - name: Deploy to Org
+      - name: Prepare test logic
+        id: test_logic
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
+          VALIDATION_ONLY="${{ github.event.inputs.validation_only }}"
 
-          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
-          # Normalize test classes: remove spaces, flatten newlines, ensure comma-separated
-          TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
+          echo "Selected TEST_LEVEL = $TEST_LEVEL"
+          echo "Selected TEST_CLASSES = $TEST_CLASSES"
+          echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
 
-          if [[ -z "$TEST_CLASSES" ]]; then
-          echo "❌ Please specify the Test Classes Names to run."
-          exit 1
-          else
-          echo "▶ Running specified tests: $TEST_CLASSES"
-          sfdx force:source:deploy \
-          -c -p force-app/main/default \
-          -u $DEV_ORG_USERNAME \
-          -l RunSpecifiedTests \
-          -r "$TEST_CLASSES"
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr -d ' ')
+            if [[ -z "$TEST_CLASSES" ]]; then
+              echo "❌ Please specify Test Class names for RunSpecifiedTests."
+              exit 1
+            fi
           fi
-          else
-          echo "▶ Running test level: $TEST_LEVEL"
-          sfdx force:source:deploy \
-          -c -p force-app/main/default \
-          -u $DEV_ORG_USERNAME \
-          -l "$TEST_LEVEL"
-          fi
+
+          echo "TEST_LEVEL=$TEST_LEVEL" >> $GITHUB_ENV
+          echo "TEST_CLASSES=$TEST_CLASSES" >> $GITHUB_ENV
+          echo "VALIDATION_ONLY=$VALIDATION_ONLY" >> $GITHUB_ENV
+
+          echo "Validation"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
           echo "🎉 Validation completed successfully"
