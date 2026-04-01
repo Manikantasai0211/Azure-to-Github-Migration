@@ -88,39 +88,15 @@ jobs:
       - name: Authenticate and deploy
         id: deploy_step
         run: |
-          TEST_LEVEL="${{ github.event.inputs.test_level }}"
-          TEST_CLASSES="${{ github.event.inputs.test_classes }}"
-          VALIDATION_ONLY="${{ github.event.inputs.validation_only }}"
-
-          echo "Selected TEST_LEVEL = $TEST_LEVEL"
-          echo "Selected TEST_CLASSES = $TEST_CLASSES"
-          echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
-
-          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
-            if [[ -z "$TEST_CLASSES" ]]; then
-              echo "❌ Please specify Test Class names for RunSpecifiedTests."
-              exit 1
-            fi
-            echo "▶ Deploying with specified tests: $TEST_CLASSES"
-            DEPLOY_OUTPUT=$(sf project deploy start \
-              --source-dir force-app/main/default \
-              --target-org "$DEV_ORG_USERNAME" \
-              --test-level RunSpecifiedTests \
-              --tests "$TEST_CLASSES" \
-              ${VALIDATION_ONLY:+--dry-run} \
-              --json)
-          else
-            DEPLOY_OUTPUT=$(sf project deploy start \
-              --source-dir force-app/main/default \
-              --target-org "$DEV_ORG_USERNAME" \
-              --test-level "$TEST_LEVEL" \
-              ${VALIDATION_ONLY:+--dry-run} \
-              --json)
-          fi
+          DEPLOY_OUTPUT=$(sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u "$DEV_ORG_USERNAME" \
+            -l RunSpecifiedTests \
+            -r "${{ github.event.inputs.test_classes }}" \
+            --json)
 
           echo "$DEPLOY_OUTPUT" > deploy-result.json
-          DEPLOY_ID=$(jq -r '.result.jobId' deploy-result.json)
+          DEPLOY_ID=$(jq -r '.result.id' deploy-result.json)
           echo "Deploy ID: $DEPLOY_ID"
           echo "DEPLOY_ID=$DEPLOY_ID" >> $GITHUB_ENV
 
@@ -128,7 +104,7 @@ jobs:
         if: always()
         run: |
           echo "Fetching deploy report for $DEPLOY_ID..."
-          sf project deploy report --job-id $DEPLOY_ID --target-org $DEV_ORG_USERNAME
+          sfdx force:source:deploy:report -i $DEPLOY_ID -u $DEV_ORG_USERNAME
           
           echo "Validation"
           sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
