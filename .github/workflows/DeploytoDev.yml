@@ -142,20 +142,6 @@ jobs:
             ${VALIDATION_ONLY:+-c}
           fi
 
-      - name: Deploy to Org
-        run: |
-          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-            echo "▶ Deploying with specified tests: $TEST_CLASSES"
-            sfdx force:source:deploy \
-              -p force-app/main/default \
-              -u $DEV_ORG_USERNAME \
-              -l RunSpecifiedTests \
-              -r "$TEST_CLASSES" \
-              ${VALIDATION_ONLY:+-c}
-          else
-            echo "▶ Deploying with test level: $TEST_LEVEL"
-            sfdx force:source:deploy \
-              -p force-app/main/default \
-              -u $DEV_ORG_USERNAME \
-              -l "$TEST_LEVEL" \
-              ${VALIDATION_ONLY
+          echo "Validation"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
+          echo "🎉 Validation completed successfully"
