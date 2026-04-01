@@ -1,7 +1,7 @@
 name: Deploy-To-Dev
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:   # manual trigger still available
     inputs:
       manual_commit_id:
         description: 'Manual commit ID'
@@ -26,6 +26,10 @@ on:
         required: false
         default: ''
 
+  pull_request:        # run automatically on PRs into deb branch
+    branches:
+      - deb
+
 env:
   DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
   DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
@@ -39,7 +43,6 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: 'DevOrg'
           fetch-depth: 0
 
       - name: Setup Node.js
@@ -52,30 +55,6 @@ jobs:
           npm install sfdx-cli --global
           sfdx --version
           echo 'y' | sfdx plugins:install sfpowerkit
-          
-      - name: Determine commit IDs and generate delta
-        id: commit_delta
-        run: |
-          cd force-app
-          LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
-          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
-
-          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
-            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1 | cut -d ' ' -f1)
-          fi
-
-          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
-          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
-
-          sfdx sfpowerkit:project:diff \
-            --revisionfrom $MANUAL_COMMIT_ID \
-            --revisionto $LATEST_COMMIT_ID \
-            --output Delta_pkg
-
-          if [ ! -d "Delta_pkg" ]; then
-            echo "❌ No diff found, exiting."
-            exit 1
-          fi
 
       - name: Authenticate Org
         run: |
@@ -87,10 +66,11 @@ jobs:
             --instanceurl $DEV_ORG_URL 
 
       - name: Run tests & check coverage
+        if: github.event_name == 'pull_request' && github.base_ref == 'deb'
         run: |
           echo "🔍 Collecting changed Apex classes and triggers..."
-          CHANGED_CLASSES=$(find Delta_pkg/main/default/classes -name "*.cls" -exec basename {} .cls \; 2>/dev/null)
-          CHANGED_TRIGGERS=$(find Delta_pkg/main/default/triggers -name "*.trigger" -exec basename {} .trigger \; 2>/dev/null)
+          CHANGED_CLASSES=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep "classes/.*\.cls" | sed 's#.*/##;s/\.cls//')
+          CHANGED_TRIGGERS=$(git diff --name-only origin/${{ github.base_ref }} HEAD | grep "triggers/.*\.trigger" | sed 's#.*/##;s/\.trigger//')
 
           if [[ -z "$CHANGED_CLASSES" && -z "$CHANGED_TRIGGERS" ]]; then
             echo "ℹ️ No Apex classes or triggers changed in this PR, skipping coverage check."
@@ -150,25 +130,10 @@ jobs:
               -l RunSpecifiedTests \
               -r "$TEST_CLASSES" \
               ${VALIDATION_ONLY:+-c}
-          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
-            echo "▶ Deploying with RunLocalTests"
+          else
+            echo "▶ Deploying with test level: $TEST_LEVEL"
             sfdx force:source:deploy \
               -p force-app/main/default \
               -u "$DEV_ORG_USERNAME" \
-              -l RunLocalTests \
+              -l "$TEST_LEVEL" \
               ${VALIDATION_ONLY:+-c}
-          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
-            echo "▶ Deploying with RunAllTestsInOrg"
-            sfdx force:source:deploy \
-              -p force-app/main/default \
-              -u "$DEV_ORG_USERNAME" \
-              -l RunAllTestsInOrg \
-              ${VALIDATION_ONLY:+-c}
-          elif [[ "$TEST_LEVEL" == "NoTestRun" ]]; then
-            echo "▶ Deploying with NoTestRun"
-            sfdx force:source:deploy \
-              -p force-app/main/default \
-              -u "$DEV_ORG_USERNAME" \
-              -l NoTestRun \
-              ${VALIDATION_ONLY:+-c}
-          fi
