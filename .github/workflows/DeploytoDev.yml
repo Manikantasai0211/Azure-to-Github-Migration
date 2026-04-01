@@ -123,15 +123,25 @@ jobs:
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
           if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
-            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
-            if [[ -z "$TEST_CLASSES" ]]; then
-              echo "❌ Please specify the Test Classes Names to run."
-              exit 1
-            else
-              sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
-            fi
-          else
-            sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l $TEST_LEVEL
-          fi
+          # Normalize test classes: remove spaces, flatten newlines, ensure comma-separated
+          TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
 
+          if [[ -z "$TEST_CLASSES" ]]; then
+          echo "❌ Please specify the Test Classes Names to run."
+          exit 1
+          else
+          echo "▶ Running specified tests: $TEST_CLASSES"
+          sfdx force:source:deploy \
+          -c -p force-app/main/default \
+          -u $DEV_ORG_USERNAME \
+          -l RunSpecifiedTests \
+          -r "$TEST_CLASSES"
+          fi
+          else
+          echo "▶ Running test level: $TEST_LEVEL"
+          sfdx force:source:deploy \
+          -c -p force-app/main/default \
+          -u $DEV_ORG_USERNAME \
+          -l "$TEST_LEVEL"
+          fi
           echo "🎉 Validation completed successfully"
