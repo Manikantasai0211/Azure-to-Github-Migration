@@ -65,6 +65,8 @@ jobs:
           cd force-app
 
           LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
+
+
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
           if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
@@ -75,13 +77,10 @@ jobs:
           echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
           echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
 
-          sfdx sfpowerkit:project:diff \
-            --revisionfrom $MANUAL_COMMIT_ID \
-            --revisionto $LATEST_COMMIT_ID \
-            --output Delta_pkg
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
 
           if [ ! -d "Delta_pkg" ]; then
-            echo "❌ No diff found, exiting."
+            echo "No diff found, exiting."
             exit 1
           fi
 
@@ -95,55 +94,19 @@ jobs:
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
-          VALIDATION_ONLY="${{ github.event.inputs.validation_only }}"
 
-          echo "Selected TEST_LEVEL = $TEST_LEVEL"
-          echo "Selected TEST_CLASSES = $TEST_CLASSES"
-          echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
-
-          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
-          # Normalize test classes: flatten newlines, strip spaces, ensure comma-separated
-          TEST_CLASSES=$(echo "$TEST_CLASSES" | tr '\n' ',' | tr -d ' ' | tr -s ',' | sed 's/^,//;s/,$//')
-
-          if [[ -z "$TEST_CLASSES" ]]; then
-          echo "❌ Please specify Test Class names for RunSpecifiedTests."
-            exit 1
+          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
+            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+            if [[ -z "$TEST_CLASSES" ]]; then
+              echo "Please specify the Test Classes Names to run."
+              exit 1
+            else
+              TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
+            fi
           fi
 
-          echo "▶ Deploying with specified tests: $TEST_CLASSES"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunSpecifiedTests \
-            -r "$TEST_CLASSES" \
-            ${VALIDATION_ONLY:+-c}
-
-          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
-          echo "▶ Deploying with RunLocalTests (default for production)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunLocalTests \
-            ${VALIDATION_ONLY:+-c}
-
-          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
-            echo "▶ Deploying with RunAllTestsInOrg (includes managed package tests)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l RunAllTestsInOrg \
-            ${VALIDATION_ONLY:+-c}
-
-          elif [[ "$TEST_LEVEL" == "NoTestRun" ]]; then
-          echo "▶ Deploying with NoTestRun (only allowed in dev/sandbox orgs)"
-          sfdx force:source:deploy \
-            -p force-app/main/default \
-            -u "$DEV_ORG_USERNAME" \
-            -l NoTestRun \
-            ${VALIDATION_ONLY:+-c}
-          fi
 
           
           echo "Validation"
-          sfdx force:source:deploy -c -p force-app/main/default -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
           echo "🎉 Validation completed successfully"
