@@ -5,7 +5,7 @@ public with sharing class AccountHelper {
         }
         if (industry == 'Technology') {
             return 'Premium';
-        }
+        } 
         return 'Standard';
     }
 }

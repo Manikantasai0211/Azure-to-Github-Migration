@@ -8,7 +8,7 @@ private class AccountHelperTest {
     @isTest static void testTechnologyIndustry() {
         String result = AccountHelper.getAccountType('Technology');
         System.assertEquals('Premium', result, 'Technology industry should return Premium');
-    }
+    } 
 
     @isTest static void testOtherIndustry() {
         String result = AccountHelper.getAccountType('Finance');
