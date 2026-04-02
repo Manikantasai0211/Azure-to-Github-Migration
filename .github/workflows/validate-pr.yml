@@ -43,10 +43,15 @@ jobs:
 
       - name: Generate Delta Package
         run: |
-          sfdx sfpowerkit:delta:generate \
+          sfdx sfpowerkit:source:delta:generate \
             -s HEAD \
             -t origin/DevOrg \
             -d delta
+          if [ ! -d "delta" ] || [ -z "$(ls -A delta)" ]; then
+            echo "❌ Delta folder is empty. No changed metadata found."
+            exit 1
+          fi
+          ls -R delta
 
       - name: Validate Deployment (CheckOnly)
         run: |
@@ -57,6 +62,7 @@ jobs:
             -l RunLocalTests \
             -c \
             --json > deploy-result.json || true
+          cat deploy-result.json | jq .
 
       - name: Show Deploy Report
         if: always()
