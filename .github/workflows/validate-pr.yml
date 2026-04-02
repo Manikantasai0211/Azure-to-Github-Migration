@@ -53,17 +53,6 @@ jobs:
             -c \
             --json > deploy-result.json || true
 
-      - name: Show Deploy Report
-        if: always()
-        run: |
-          DEPLOY_ID=$(jq -r '.result.id // empty' deploy-result.json)
-          if [[ -n "$DEPLOY_ID" ]]; then
-            echo "Fetching deploy report for $DEPLOY_ID..."
-            sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg
-          else
-            echo "❌ No deploy ID found in result"
-          fi
-
       - name: Generate Coverage Report
         if: always()
         run: |
