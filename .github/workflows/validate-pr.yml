@@ -1,0 +1,85 @@
+name: Validate-PR
+
+on:
+  pull_request:
+    branches:
+      - DevOrg   # target branch for PRs
+
+env:
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16.x'
+
+      - name: Install Salesforce CLI
+        run: |
+          npm install --global sfdx-cli
+          sfdx --version
+
+      - name: Install sfpowerkit plugin
+        run: echo 'y' | sfdx plugins:install sfpowerkit
+
+      - name: Authenticate Org
+        run: |
+          sfdx force:auth:jwt:grant \
+            --clientid $DEV_ORG_CLIENTID \
+            --jwtkeyfile ./server.key \
+            --username $DEV_ORG_USERNAME \
+            --instanceurl $DEV_ORG_URL \
+            --setalias DevOrg
+
+      - name: Validate Deployment (CheckOnly)
+        run: |
+          echo "▶ Running validation-only deploy for PR"
+          sfdx force:source:deploy \
+            -p force-app/main/default \
+            -u DevOrg \
+            -l RunSpecifiedTests \
+            -r AccountHelperTest \
+            -c \
+            --json > deploy-result.json
+
+      - name: Show Deploy Report
+        if: always()
+        run: |
+          DEPLOY_ID=$(jq -r '.result.id' deploy-result.json)
+          echo "Fetching deploy report for $DEPLOY_ID..."
+          sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg
+
+      - name: Generate Coverage Report
+        if: always()
+        run: |
+          echo "▶ Fetching Apex test coverage"
+          TEST_RUN_ID=$(jq -r '.result.id' deploy-result.json)
+          sfdx force:apex:test:report \
+            -i $TEST_RUN_ID \
+            -u DevOrg \
+            --codecoverage \
+            --json > coverage.json
+
+          echo "▶ Coverage summary"
+          jq '.result.codecoverage[] | {name: .name, percentCovered: .percentCovered}' coverage.json
+
+      - name: Enforce Coverage Threshold
+        run: |
+          MIN_COVERAGE=75
+          LOW=$(jq -r '.result.codecoverage[] | select(.percentCovered < 75) | .name' coverage.json)
+          if [[ -n "$LOW" ]]; then
+            echo "❌ Coverage below $MIN_COVERAGE% for: $LOW"
+            exit 1
+          else
+            echo "✅ All classes/triggers meet coverage requirement"
+          fi
