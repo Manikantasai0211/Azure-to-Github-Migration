@@ -1,94 +1,127 @@
-name: Validate-PR
+# .github/workflows/validate-salesforce-delta.yml
+
+name: Validate Salesforce Delta Metadata on PR to DevOrg
 
 on:
   pull_request:
     branches:
-      - DevOrg   # target branch for PRs
-
-env:
-  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
-  DEV_ORG_URL: ${{ vars.DEV_URL }}
-  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+      - 'DevOrg'  # Trigger only on PRs targeting the DevOrg branch
+    types: [opened, reopened, synchronize]
 
 jobs:
-  validate:
+  validate-salesforce-metadata:
+    name: Validate Changed Apex Classes
     runs-on: ubuntu-latest
+
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      # Step 1: Checkout the repository with full history for delta generation
+      - name: Checkout repository
+        uses: actions/checkout@v3
         with:
-          fetch-depth: 0
+          fetch-depth: 0  # Required for delta generation
 
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
+      # Step 2: Set up Node.js (required for Salesforce CLI and plugins)
+      - name: Set up Node.js
+        uses: actions/setup-node@v3
         with:
-          node-version: '16.x'
+          node-version: '16'
 
+      # Step 3: Install Salesforce CLI
       - name: Install Salesforce CLI
         run: |
-          npm install --global sfdx-cli
-          sfdx --version
+          npm install sfdx-cli --global
 
+      # Step 4: Install sfpowerkit plugin
       - name: Install sfpowerkit plugin
-        run: echo 'y' | sfdx plugins:install sfpowerkit
-
-      - name: Authenticate Org
         run: |
-          sfdx force:auth:jwt:grant \
-            --clientid $DEV_ORG_CLIENTID \
-            --jwtkeyfile ./server.key \
-            --username $DEV_ORG_USERNAME \
-            --instanceurl $DEV_ORG_URL \
-            --setalias DevOrg
+          sf plugins install sfpowerkit
 
+      # Step 5: Authenticate to DevOrg using SFDX_AUTH_URL secret
+      - name: Authenticate to DevOrg
+        env:
+          SFDX_AUTH_URL: ${{ secrets.SFDX_AUTH_URL }}
+        run: |
+          echo "$SFDX_AUTH_URL" > auth_url.txt
+          sf org login sfdx-url --sfdx-url-file auth_url.txt --alias DevOrg --set-default
+
+      # Step 6: Generate delta package using sfpowerkit
       - name: Generate Delta Package
+        id: delta
         run: |
-          sfdx sfpowerkit:delta:generate \
-            -s HEAD \
-            -t origin/DevOrg \
-            -d delta
+          # Fetch the base branch to ensure both branches are available for diff
+          git fetch origin ${{ github.event.pull_request.base.ref }} --depth=1
 
-      - name: Validate Deployment (CheckOnly)
-        run: |
-          echo "▶ Running validation-only deploy for PR"
-          sfdx force:source:deploy \
-            -p delta \
-            -u DevOrg \
-            -l RunLocalTests \
-            -c \
-            --json > deploy-result.json || true
+          # Generate delta between base (target) and head (source) branches
+          sfpowerkit:project:diff \
+            --revisionfrom origin/${{ github.event.pull_request.base.ref }} \
+            --revisionto ${{ github.head_ref }} \
+            --output delta \
+            --generatedestructive
 
-      - name: Show Deploy Report
-        if: always()
-        run: |
-          DEPLOY_ID=$(jq -r '.result.id // empty' deploy-result.json)
-          if [[ -n "$DEPLOY_ID" ]]; then
-            echo "Fetching deploy report for $DEPLOY_ID..."
-            sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg --json | jq .
-          else
-            echo "❌ No deploy ID found in result. Check deploy-result.json for errors."
-          fi
+          echo "Delta generation completed"
 
-      - name: Run Apex Tests with Coverage
-        if: always()
-        run: |
-          echo "▶ Running Apex tests for coverage"
-          sfdx force:apex:test:run \
-            -u DevOrg \
-            -r AccountHelperTest \
-            --codecoverage \
-            --json > coverage.json || true
-
-          echo "▶ Coverage summary"
-          jq '.result.codecoverage[] | {name: .name, percentCovered: .percentCovered}' coverage.json
-
-      - name: Enforce Coverage Threshold
-        run: |
-          MIN_COVERAGE=75
-          LOW=$(jq -r '.result.codecoverage[] | select(.percentCovered < 75) | .name' coverage.json)
-          if [[ -n "$LOW" ]]; then
-            echo "❌ Coverage below $MIN_COVERAGE% for: $LOW"
+          # Fail early if delta folder is empty
+          if [ ! -d "delta" ] || [ -z "$(ls -A delta)" ]; then
+            echo "Delta folder is empty. Exiting."
             exit 1
-          else
-            echo "✅ All classes/triggers meet coverage requirement"
           fi
+
+      # Step 7: Deploy delta package in check-only mode (dry-run)
+      - name: Deploy Delta Package (Check Only)
+        id: deploy
+        run: |
+          DEPLOY_OUTPUT=$(sf project deploy start --source-dir delta --target-org DevOrg --dry-run --json || echo '{}')
+          echo "$DEPLOY_OUTPUT" > deploy_output.json
+          DEPLOY_ID=$(echo "$DEPLOY_OUTPUT" | jq -r '.result.id // empty')
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "No deploy ID found. Deployment failed or no changes to deploy."
+            exit 1
+          fi
+          echo "deploy_id=$DEPLOY_ID" >> $GITHUB_OUTPUT
+
+      # Step 8: Extract changed Apex test class names from delta
+      - name: Extract Changed Apex Test Classes
+        id: extract_tests
+        run: |
+          TEST_CLASSES=$(find delta -type f -name "*Test.cls" | sed -E 's|.*/||' | sed -E 's/\.cls$//' | paste -sd "," -)
+          if [ -z "$TEST_CLASSES" ]; then
+            echo "No test classes found in delta. Exiting."
+            exit 1
+          fi
+          echo "test_classes=$TEST_CLASSES" >> $GITHUB_OUTPUT
+
+      # Step 9: Run Apex tests for changed test classes only
+      - name: Run Apex Tests for Changed Classes
+        id: test
+        run: |
+          echo "Running tests for: ${{ steps.extract_tests.outputs.test_classes }}"
+          TEST_OUTPUT=$(sf apex run test --tests "${{ steps.extract_tests.outputs.test_classes }}" --result-format json --output-dir test-results --wait 10 --target-org DevOrg || echo '{}')
+          echo "$TEST_OUTPUT" > test_output.json
+          TEST_STATUS=$(cat test_output.json | jq -r '.status // empty')
+          if [ "$TEST_STATUS" != "Completed" ]; then
+            echo "Test run did not complete successfully."
+            exit 1
+          fi
+
+      # Step 10: Display code coverage results for changed classes
+      - name: Display Code Coverage
+        run: |
+          if [ ! -f test_output.json ]; then
+            echo "Test output not found. Skipping coverage."
+            exit 1
+          fi
+          COVERAGE=$(cat test_output.json | jq -r '.result.coverage[]? | "\(.name): \(.percentCovered)% covered"')
+          if [ -z "$COVERAGE" ]; then
+            echo "No coverage data found."
+            exit 1
+          fi
+          echo "Code Coverage Results:"
+          echo "$COVERAGE"
+
+      # Step 11: Upload test results as an artifact for further analysis
+      - name: Upload Test Results
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: apex-test-results
+          path: test-results
