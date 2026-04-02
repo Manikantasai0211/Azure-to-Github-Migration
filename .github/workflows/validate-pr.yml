@@ -14,31 +14,24 @@ jobs:
   validate:
     runs-on: ubuntu-latest
     steps:
-      # 1. Checkout PR branch
       - name: Checkout code
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # 2. Setup Node.js
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '16.x'
 
-      # 3. Install Salesforce CLI
       - name: Install Salesforce CLI
         run: |
           npm install --global sfdx-cli
           sfdx --version
 
-      # 4. Install sfpowerkit plugin
       - name: Install sfpowerkit plugin
-        run: |
-          echo 'y' | sfdx plugins:install sfpowerkit
-          sfdx plugins --core
+        run: echo 'y' | sfdx plugins:install sfpowerkit
 
-      # 5. Authenticate Org
       - name: Authenticate Org
         run: |
           sfdx force:auth:jwt:grant \
@@ -48,21 +41,13 @@ jobs:
             --instanceurl $DEV_ORG_URL \
             --setalias DevOrg
 
-      # 6. Generate delta package between PR branch and DevOrg branch
       - name: Generate Delta Package
         run: |
-          echo "▶ Generating delta package"
-          sfdx sfpowerkit:source:delta:generate \
+          sfdx sfpowerkit:delta:generate \
             -s HEAD \
             -t origin/DevOrg \
             -d delta
-          if [ ! -d "delta" ] || [ -z "$(ls -A delta)" ]; then
-            echo "❌ Delta folder is empty. No changed metadata found."
-            exit 1
-          fi
-          ls -R delta
 
-      # 7. Validate deployment of only changed files
       - name: Validate Deployment (CheckOnly)
         run: |
           echo "▶ Running validation-only deploy for PR"
@@ -72,10 +57,7 @@ jobs:
             -l RunLocalTests \
             -c \
             --json > deploy-result.json || true
-          echo "▶ Raw deploy result"
-          cat deploy-result.json | jq .
 
-      # 8. Show deploy report if ID exists
       - name: Show Deploy Report
         if: always()
         run: |
@@ -84,10 +66,9 @@ jobs:
             echo "Fetching deploy report for $DEPLOY_ID..."
             sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg --json | jq .
           else
-            echo "❌ No deploy ID found. Check deploy-result.json for errors."
+            echo "❌ No deploy ID found in result. Check deploy-result.json for errors."
           fi
 
-      # 9. Run Apex tests only for the PR test class
       - name: Run Apex Tests with Coverage
         if: always()
         run: |
@@ -99,9 +80,8 @@ jobs:
             --json > coverage.json || true
 
           echo "▶ Coverage summary"
-          jq '.result.codecoverage[] | {name: .name, percentCovered: .percentCovered}' coverage.json || echo "❌ No coverage data"
+          jq '.result.codecoverage[] | {name: .name, percentCovered: .percentCovered}' coverage.json
 
-      # 10. Enforce coverage threshold
       - name: Enforce Coverage Threshold
         run: |
           MIN_COVERAGE=75
