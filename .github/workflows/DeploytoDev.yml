@@ -62,7 +62,7 @@ jobs:
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
-          cd force-app
+
 
           LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
 
