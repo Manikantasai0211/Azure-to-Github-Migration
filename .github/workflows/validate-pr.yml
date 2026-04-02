@@ -52,7 +52,7 @@ jobs:
       - name: Generate Delta Package
         run: |
           echo "▶ Generating delta package"
-          sfdx sfpowerkit:delta:generate \
+          sfdx sfpowerkit:source:delta:generate \
             -s HEAD \
             -t origin/DevOrg \
             -d delta
