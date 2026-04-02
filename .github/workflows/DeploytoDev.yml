@@ -95,18 +95,31 @@ jobs:
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
-          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
-            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
-            if [[ -z "$TEST_CLASSES" ]]; then
-              echo "Please specify the Test Classes Names to run."
+          echo "▶ Starting validation with test level: $TEST_LEVEL"
+
+          case "$TEST_LEVEL" in
+            NoTestRun)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel NoTestRun
+              ;;
+            RunSpecifiedTests)
+              TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+              if [[ -z "$TEST_CLASSES" ]]; then
+                echo "❌ Please specify the Test Classes Names to run."
+                exit 1
+              fi
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunSpecifiedTests --runtests "$TEST_CLASSES"
+              ;;
+            RunLocalTests)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunLocalTests
+              ;;
+            RunAllTestsInOrg)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunAllTestsInOrg
+              ;;
+            *)
+              echo "❌ Invalid test level: $TEST_LEVEL"
               exit 1
-            else
-              TEST_LEVEL="$TEST_LEVEL -r $TEST_CLASSES"
-            fi
-          fi
+              ;;
+          esac
 
-
-          
-          echo "Validation"
-          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
           echo "🎉 Validation completed successfully"
+
