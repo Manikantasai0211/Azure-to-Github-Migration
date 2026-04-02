@@ -1,8 +1,7 @@
 <Package xmlns="
 http://soap.sforce.com/2006/04/metadata">
 <types> 
-<members>ForgotPasswordControllerTest</members>
-<members>ForgotPasswordController</members>
+<members>SimilarBoatsController</members>
 <name>ApexClass</name>
 </types>
 <version>62.0</version>
