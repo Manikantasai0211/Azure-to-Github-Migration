@@ -34,7 +34,7 @@ jobs:
 
       - name: Authenticate Org
         run: |
-          echo "${{ secrets.DEV_JWT_KEY }}" > server.key
+          echo "${{ secrets.DEV_ORG_CLIENTID }}" > server.key
           sfdx force:auth:jwt:grant \
             --clientid $DEV_ORG_CLIENTID \
             --jwtkeyfile ./server.key \
