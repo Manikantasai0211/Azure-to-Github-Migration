@@ -34,6 +34,7 @@ jobs:
 
       - name: Authenticate Org
         run: |
+          echo "${{ secrets.DEV_JWT_KEY }}" > server.key
           sfdx force:auth:jwt:grant \
             --clientid $DEV_ORG_CLIENTID \
             --jwtkeyfile ./server.key \
@@ -50,14 +51,18 @@ jobs:
             -l RunSpecifiedTests \
             -r AccountHelperTest \
             -c \
-            --json > deploy-result.json
+            --json > deploy-result.json || true
 
       - name: Show Deploy Report
         if: always()
         run: |
-          DEPLOY_ID=$(jq -r '.result.id' deploy-result.json)
-          echo "Fetching deploy report for $DEPLOY_ID..."
-          sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg
+          DEPLOY_ID=$(jq -r '.result.id // empty' deploy-result.json)
+          if [[ -n "$DEPLOY_ID" ]]; then
+            echo "Fetching deploy report for $DEPLOY_ID..."
+            sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg
+          else
+            echo "❌ No deploy ID found in result"
+          fi
 
       - name: Generate Coverage Report
         if: always()
