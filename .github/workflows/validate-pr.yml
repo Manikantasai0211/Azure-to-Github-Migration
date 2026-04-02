@@ -34,7 +34,6 @@ jobs:
 
       - name: Authenticate Org
         run: |
-          echo "${{ secrets.DEV_ORG_CLIENTID }}" > server.key
           sfdx force:auth:jwt:grant \
             --clientid $DEV_ORG_CLIENTID \
             --jwtkeyfile ./server.key \
@@ -53,16 +52,26 @@ jobs:
             -c \
             --json > deploy-result.json || true
 
-      - name: Generate Coverage Report
+      - name: Show Deploy Report
         if: always()
         run: |
-          echo "▶ Fetching Apex test coverage"
-          TEST_RUN_ID=$(jq -r '.result.id' deploy-result.json)
-          sfdx force:apex:test:report \
-            -i $TEST_RUN_ID \
+          DEPLOY_ID=$(jq -r '.result.id // empty' deploy-result.json)
+          if [[ -n "$DEPLOY_ID" ]]; then
+            echo "Fetching deploy report for $DEPLOY_ID..."
+            sfdx force:source:deploy:report -i $DEPLOY_ID -u DevOrg
+          else
+            echo "❌ No deploy ID found in result"
+          fi
+
+      - name: Run Apex Tests with Coverage
+        if: always()
+        run: |
+          echo "▶ Running Apex tests for coverage"
+          sfdx force:apex:test:run \
             -u DevOrg \
+            -r AccountHelperTest \
             --codecoverage \
-            --json > coverage.json
+            --json > coverage.json || true
 
           echo "▶ Coverage summary"
           jq '.result.codecoverage[] | {name: .name, percentCovered: .percentCovered}' coverage.json
