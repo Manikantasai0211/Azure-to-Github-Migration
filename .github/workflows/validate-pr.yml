@@ -41,19 +41,22 @@ jobs:
             --instanceurl $DEV_ORG_URL \
             --setalias DevOrg
 
+      - name: Generate Delta Package
+        run: |
+          sfdx sfpowerkit:delta:generate \
+            -s HEAD \
+            -t origin/DevOrg \
+            -d delta
+
       - name: Validate Deployment (CheckOnly)
         run: |
           echo "▶ Running validation-only deploy for PR"
           sfdx force:source:deploy \
-            -p force-app/main/default \
+            -p delta \
             -u DevOrg \
-            -l RunSpecifiedTests \
-            -r AccountHelperTest \
+            -l RunLocalTests \
             -c \
             --json > deploy-result.json || true
-
-          echo "▶ Raw deploy result"
-          cat deploy-result.json | jq .
 
       - name: Show Deploy Report
         if: always()
