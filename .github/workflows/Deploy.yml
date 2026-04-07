@@ -39,7 +39,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
         with:
-          ref: 'devpoc'
+          ref: 'DevOrg'
           fetch-depth: 0
 
       - name: Debug repo structure
@@ -63,7 +63,7 @@ jobs:
         id: commit_delta
         run: |
 
-          LATEST_COMMIT_ID=$(git log -n 1 origin/devpoc --pretty=format:'%H')
+          LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
 
 
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
