@@ -1,0 +1,126 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      manual_commit_id:
+        description: 'Manual commit ID'
+        required: false
+        default: 'default'
+
+        
+      test_level:  
+        description: 'Enter type of test case to be checked'
+        required: true
+        type: choice
+        options:
+          - NoTestRun
+          - RunSpecifiedTests
+          - RunLocalTests
+          - RunAllTestsInOrg
+        default: RunSpecifiedTests
+      test_classes:
+        description: 'Test classes'
+        required: false
+        default: ''
+
+
+env:
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+  DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+
+jobs:
+  build:
+    runs-on: 
+     group: bts-iai-eks-prd-u
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: 'devpoc'
+          fetch-depth: 0
+
+      - name: Debug repo structure
+        run: |
+          pwd
+          ls -la
+          find . -name "sfdx-project.json"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16.x'
+
+      - name: Install SFDX CLI and plugins
+        run: |
+          npm install sfdx-cli --global
+          sfdx --version
+          echo 'y' | sfdx plugins:install sfpowerkit
+          
+      - name: Determine commit IDs and generate delta
+        id: commit_delta
+        run: |
+
+          LATEST_COMMIT_ID=$(git log -n 1 origin/devpoc --pretty=format:'%H')
+
+
+          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
+
+          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
+            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1)
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+          fi
+
+          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
+          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
+
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+
+          if [ ! -d "Delta_pkg" ]; then
+            echo "No diff found, exiting."
+            exit 1
+          fi
+
+      - name: Validation and deploy
+        run: |
+          TEST_LEVEL="${{ github.event.inputs.test_level }}"
+          TEST_CLASSES="${{ github.event.inputs.test_classes }}"
+
+          echo "▶ Starting Metadata Validation with test level: $TEST_LEVEL"
+          
+          # Base command for Metadata API Deployment
+          # -c: Check only (Validation)
+          # -d: Deployment directory (Delta_pkg)
+          # -u: Target username
+          # -w: Wait time in minutes (Crucial for seeing the final file list)
+          # --verbose: Lists every file included in the delta
+          BASE_CMD="sfdx force:mdapi:deploy -c -d Delta_pkg -u amitk.kumar@abbvie.hcwec.devpilotgp -w 10 --verbose"
+
+          case "$TEST_LEVEL" in
+            NoTestRun)
+              $BASE_CMD --testlevel NoTestRun
+              ;;
+            RunSpecifiedTests)
+              # Clean up spaces in class names
+              TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+              if [[ -z "$TEST_CLASSES" ]]; then
+                echo "❌ Error: RunSpecifiedTests selected but no test classes provided."
+                exit 1
+              fi
+              $BASE_CMD --testlevel RunSpecifiedTests --runtests "$TEST_CLASSES"
+              ;;
+            RunLocalTests)
+              $BASE_CMD --testlevel RunLocalTests
+              ;;
+            RunAllTestsInOrg)
+              $BASE_CMD --testlevel RunAllTestsInOrg
+              ;;
+            *)
+              echo "❌ Invalid test level: $TEST_LEVEL"
+              exit 1
+              ;;
+          esac
+
+          echo "🎉 Validation completed successfully"
