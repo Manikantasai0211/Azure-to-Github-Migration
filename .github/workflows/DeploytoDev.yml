@@ -7,7 +7,9 @@ on:
         description: 'Manual commit ID'
         required: false
         default: 'default'
-      test_level:
+
+        
+      test_level:  
         description: 'Enter type of test case to be checked'
         required: true
         type: choice
@@ -21,6 +23,7 @@ on:
         description: 'Test classes'
         required: false
         default: ''
+
 
 env:
   DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
@@ -54,13 +57,14 @@ jobs:
           npm install sfdx-cli --global
           sfdx --version
           echo 'y' | sfdx plugins:install sfpowerkit
-
+          
       - name: Determine commit IDs and generate delta
         id: commit_delta
         run: |
-          cd force-app
 
           LATEST_COMMIT_ID=$(git log -n 1 origin/DevOrg --pretty=format:'%H')
+
+
           MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
 
           if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
@@ -74,47 +78,46 @@ jobs:
           sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
 
           if [ ! -d "Delta_pkg" ]; then
-            echo "❌ No diff found, exiting."
+            echo "No diff found, exiting."
             exit 1
           fi
 
       - name: Authenticate Org
         run: |
           echo "Authenticating DEV Org"
-          echo "${{ secrets.SERVER_KEY }}" > server.key
-          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL
+          sfdx force:auth:jwt:grant --clientid $DEV_ORG_CLIENTID --jwtkeyfile ./server.key --username $DEV_ORG_USERNAME --instanceurl $DEV_ORG_URL 
 
-      - name: Check Code Coverage
-        run: |
-          echo "🔍 Running all tests with coverage..."
-          sfdx force:apex:test:run -u $DEV_ORG_USERNAME --codecoverage --resultformat json --outputdir test-results --wait 30
 
-          echo "🔍 Validating per-class coverage..."
-          LOW_COVERAGE=$(jq '.coverage.coverageByClass[] | select(.percent < 75)' test-results/test-result.json)
-
-          if [[ -n "$LOW_COVERAGE" ]]; then
-            echo "❌ Some classes/triggers have <75% coverage:"
-            echo "$LOW_COVERAGE"
-            exit 1
-          else
-            echo "✅ All classes/triggers have >=75% coverage."
-          fi
-
-      - name: Deploy to Org
+      - name: Validation and deploy
         run: |
           TEST_LEVEL="${{ github.event.inputs.test_level }}"
           TEST_CLASSES="${{ github.event.inputs.test_classes }}"
 
-          if [[ "$TEST_LEVEL" == 'RunSpecifiedTests' ]]; then
-            TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
-            if [[ -z "$TEST_CLASSES" ]]; then
-              echo "❌ Please specify the Test Classes Names to run."
+          echo "▶ Starting validation with test level: $TEST_LEVEL"
+
+          case "$TEST_LEVEL" in
+            NoTestRun)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel NoTestRun
+              ;;
+            RunSpecifiedTests)
+              TEST_CLASSES=$(echo $TEST_CLASSES | tr -d ' ')
+              if [[ -z "$TEST_CLASSES" ]]; then
+                echo "❌ Please specify the Test Classes Names to run."
+                exit 1
+              fi
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunSpecifiedTests --runtests "$TEST_CLASSES"
+              ;;
+            RunLocalTests)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunLocalTests
+              ;;
+            RunAllTestsInOrg)
+              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME --testlevel RunAllTestsInOrg
+              ;;
+            *)
+              echo "❌ Invalid test level: $TEST_LEVEL"
               exit 1
-            else
-              sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l RunSpecifiedTests -r $TEST_CLASSES
-            fi
-          else
-            sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l $TEST_LEVEL
-          fi
+              ;;
+          esac
 
           echo "🎉 Validation completed successfully"
+

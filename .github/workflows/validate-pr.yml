@@ -1,0 +1,78 @@
+name: DevOrg-PR-Validation-With-ORG
+
+on:
+  pull_request:
+    branches:
+      - 'DevOrg'  # Trigger for PRs targeting 'DevOrg'
+    types:
+      - opened
+      - synchronize  # Triggered when PR is updated
+      - reopened    # Triggered when PR is reopened
+
+env:
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}  # Use the branch reference from the PR's source branch
+          fetch-depth: 0
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16.x'
+
+      - name: Install SFDX CLI and plugins
+        run: |
+          npm install sfdx-cli --global
+          sfdx --version
+          echo 'y' | sfdx plugins:install sfpowerkit
+
+      - name: Determine commit IDs and generate delta
+        id: commit_delta
+        run: |
+          # Get the commit IDs for the PR
+          LATEST_COMMIT_ID="${{ github.event.pull_request.head.sha }}"  # PR branch commit (head)
+          MANUAL_COMMIT_ID="${{ github.event.pull_request.base.sha }}"  # Base branch commit (target of PR)
+
+          if [[ "$MANUAL_COMMIT_ID" == 'default' ]]; then
+            MANUAL_COMMIT_ID=$(git log --format="%P" -n 1)
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+          fi
+
+          echo "Latest COMMIT ID (PR Head) = $LATEST_COMMIT_ID"
+          echo "Previous COMMIT ID (Base Branch) = $MANUAL_COMMIT_ID"
+
+          # Generate the delta package for the changes between commits
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+
+          if [ ! -d "Delta_pkg" ]; then
+            echo "No diff found, exiting."
+            exit 1
+          fi
+
+      - name: Authenticate with Salesforce Org
+        run: |
+          echo "Authenticating with Salesforce Org"
+            sfdx force:auth:jwt:grant \
+            --clientid $DEV_ORG_CLIENTID \
+            --jwtkeyfile ./server.key \
+            --username $DEV_ORG_USERNAME \
+            --instanceurl $DEV_ORG_URL \
+            --setalias DevOrg
+
+      - name: Validate with Salesforce Org (No Test Run)
+        run: |
+          TEST_LEVEL="NoTestRun"  # Fixed test level to 'NoTestRun'
+
+          echo "Running validation (NoTestRun)"
+          # Validate (check) the code without running any tests
+          sfdx force:source:deploy -c -p Delta_pkg/force-app -u $DEV_ORG_USERNAME -l "$TEST_LEVEL"
+          echo "🎉 Validation completed successfully"
