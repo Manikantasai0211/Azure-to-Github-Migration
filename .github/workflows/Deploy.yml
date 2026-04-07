@@ -95,7 +95,7 @@ jobs:
           # -u: Target username
           # -w: Wait time in minutes (Crucial for seeing the final file list)
           # --verbose: Lists every file included in the delta
-          BASE_CMD="sfdx force:mdapi:deploy -c -d Delta_pkg -u amitk.kumar@abbvie.hcwec.devpilotgp -w 10 --verbose"
+          BASE_CMD="sfdx force:mdapi:deploy -c -d Delta_pkg -u $DEV_ORG_USERNAME -w 10 --verbose"
 
           case "$TEST_LEVEL" in
             NoTestRun)
