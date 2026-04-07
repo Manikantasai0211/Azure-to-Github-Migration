@@ -34,7 +34,7 @@ env:
 jobs:
   build:
     runs-on: 
-     group: bts-iai-eks-prd-u
+     group: ubuntu-latest
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
