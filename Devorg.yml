@@ -1,0 +1,225 @@
+name: DevOrg
+
+on:
+  workflow_dispatch:
+    inputs:
+      manual_commit_id:
+        description: "Manual commit ID"
+        required: false
+        default: "default"
+
+      test_level:
+        description: "Enter type of test case to be checked"
+        required: true
+        type: choice
+        options:
+          - NoTestRun
+          - RunSpecifiedTests
+          - RunLocalTests
+          - RunAllTestsInOrg
+        default: RunSpecifiedTests
+
+      test_classes:
+        description: "Test classes (comma separated for RunSpecifiedTests)"
+        required: false
+        default: ""
+
+      validation_only:
+        description: "Validation only deployment for DevOrg"
+        required: true
+        type: choice
+        options:
+          - true
+          - false
+        default: true
+
+env:
+  DEV_ORG_USERNAME: ${{ vars.DEV_USERNAME }}
+  DEV_ORG_PASSWORD: ${{ secrets.DEV_PASSWORD }}
+  DEV_ORG_URL: ${{ vars.DEV_URL }}
+  DEV_ORG_CLIENTID: ${{ secrets.DEV_ORG_CLIENTID }}
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: feature
+          fetch-depth: 0
+
+      - name: Debug repo structure
+        run: |
+          pwd
+          ls -la
+          find . -name "sfdx-project.json"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "16.x"
+
+      - name: Install SFDX CLI and plugins
+        run: |
+          npm install sfdx-cli --global
+          sfdx --version
+          echo 'y' | sfdx plugins:install sfpowerkit
+
+      - name: Determine commit IDs and generate delta
+        id: commit_delta
+        run: |
+          cd force-app
+
+          LATEST_COMMIT_ID=$(git log -n 1 origin/feature --pretty=format:'%H')
+          MANUAL_COMMIT_ID="${{ github.event.inputs.manual_commit_id }}"
+
+          if [[ "$MANUAL_COMMIT_ID" == "default" ]]; then
+            MANUAL_COMMIT_ID=$(git log --format='%P' -n 1)
+            MANUAL_COMMIT_ID=$(echo $MANUAL_COMMIT_ID | cut -d ' ' -f1)
+          fi
+
+          echo "Latest COMMIT ID = $LATEST_COMMIT_ID"
+          echo "Previous COMMIT ID = $MANUAL_COMMIT_ID"
+
+          sfdx sfpowerkit:project:diff -r $MANUAL_COMMIT_ID -t $LATEST_COMMIT_ID -d Delta_pkg
+
+          if [ ! -d "Delta_pkg" ]; then
+            echo "❌ No diff found, exiting."
+            exit 1
+          fi
+
+      - name: Authenticate Dev Org
+        run: |
+          echo "Authenticating DEV Org"
+          sfdx force:auth:jwt:grant \
+            --clientid $DEV_ORG_CLIENTID \
+            --jwtkeyfile ./server.key \
+            --username $DEV_ORG_USERNAME \
+            --instanceurl $DEV_ORG_URL
+
+      - name: Prepare test logic
+        id: test_logic
+        run: |
+          TEST_LEVEL="${{ github.event.inputs.test_level }}"
+          TEST_CLASSES="${{ github.event.inputs.test_classes }}"
+          VALIDATION_ONLY="${{ github.event.inputs.validation_only }}"
+
+          echo "Selected TEST_LEVEL = $TEST_LEVEL"
+          echo "Selected TEST_CLASSES = $TEST_CLASSES"
+          echo "Selected VALIDATION_ONLY = $VALIDATION_ONLY"
+
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+            TEST_CLASSES=$(echo "$TEST_CLASSES" | tr -d ' ')
+            if [[ -z "$TEST_CLASSES" ]]; then
+              echo "❌ Please specify Test Class names for RunSpecifiedTests."
+              exit 1
+            fi
+          fi
+
+          echo "TEST_LEVEL=$TEST_LEVEL" >> $GITHUB_ENV
+          echo "TEST_CLASSES=$TEST_CLASSES" >> $GITHUB_ENV
+          echo "VALIDATION_ONLY=$VALIDATION_ONLY" >> $GITHUB_ENV
+
+      - name: Run apex tests and validate code coverage >= 75
+        if: ${{ github.event.inputs.test_level != 'NoTestRun' }}
+        run: |
+          mkdir -p test-results
+
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+            echo "Running specified tests: $TEST_CLASSES"
+            sfdx force:apex:test:run \
+              --targetusername $DEV_ORG_USERNAME \
+              --classnames "$TEST_CLASSES" \
+              --resultformat json \
+              --codecoverage \
+              --wait 60 \
+              > test-results/apex-test-result.json
+          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
+            echo "Running local tests"
+            sfdx force:apex:test:run \
+              --targetusername $DEV_ORG_USERNAME \
+              --testlevel RunLocalTests \
+              --resultformat json \
+              --codecoverage \
+              --wait 60 \
+              > test-results/apex-test-result.json
+          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
+            echo "Running all tests in org"
+            sfdx force:apex:test:run \
+              --targetusername $DEV_ORG_USERNAME \
+              --testlevel RunAllTestsInOrg \
+              --resultformat json \
+              --codecoverage \
+              --wait 60 \
+              > test-results/apex-test-result.json
+          fi
+
+          cat test-results/apex-test-result.json
+
+          COVERAGE=$(jq -r '
+            if .result.summary.testRunCoverage != null
+            then .result.summary.testRunCoverage
+            elif .result.summary.orgWideCoverage != null
+            then .result.summary.orgWideCoverage
+            else 0
+            end
+          ' test-results/apex-test-result.json)
+
+          echo "Calculated Coverage = $COVERAGE%"
+
+          if [[ "$COVERAGE" -lt 75 ]]; then
+            echo "❌ Code coverage is below 75%. Current coverage: $COVERAGE%"
+            exit 1
+          fi
+
+          echo "✅ Code coverage is >= 75%"
+
+      - name: Validate / Deploy Delta Package to Dev Org
+        run: |
+          DEPLOY_PATH="Delta_pkg/force-app"
+
+          if [[ ! -d "$DEPLOY_PATH" ]]; then
+            echo "❌ Deployment path not found: $DEPLOY_PATH"
+            exit 1
+          fi
+
+          echo "Starting deployment with TEST_LEVEL=$TEST_LEVEL"
+
+          if [[ "$VALIDATION_ONLY" == "true" ]]; then
+            CHECK_ONLY="-c"
+            echo "Running validation only deployment for DevOrg"
+          else
+            CHECK_ONLY=""
+            echo "Running actual deployment for DevOrg"
+          fi
+
+          if [[ "$TEST_LEVEL" == "RunSpecifiedTests" ]]; then
+            sfdx force:source:deploy \
+              -u $DEV_ORG_USERNAME \
+              -p $DEPLOY_PATH \
+              $CHECK_ONLY \
+              -l RunSpecifiedTests \
+              -r $TEST_CLASSES
+          elif [[ "$TEST_LEVEL" == "RunLocalTests" ]]; then
+            sfdx force:source:deploy \
+              -u $DEV_ORG_USERNAME \
+              -p $DEPLOY_PATH \
+              $CHECK_ONLY \
+              -l RunLocalTests
+          elif [[ "$TEST_LEVEL" == "RunAllTestsInOrg" ]]; then
+            sfdx force:source:deploy \
+              -u $DEV_ORG_USERNAME \
+              -p $DEPLOY_PATH \
+              $CHECK_ONLY \
+              -l RunAllTestsInOrg
+          else
+            sfdx force:source:deploy \
+              -u $DEV_ORG_USERNAME \
+              -p $DEPLOY_PATH \
+              $CHECK_ONLY \
+              -l NoTestRun
+          fi
+
+          echo "✅ Validation / deployment completed successfully"
